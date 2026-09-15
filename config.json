@@ -1,0 +1,18 @@
+{
+  "name": "ScriptTask",
+  "shortName": "scripttask",
+  "version": "1.0.0",
+  "author": "Ryan Blenis, Fernando Lima",
+  "description": "MeshTask Runner — script (bash/bat/ps1) scheduling and execution for endpoints [clean rewrite: unified serveraction, SQLite, dynamic filter targeting, admin-only]",
+  "hasAdminPanel": false,
+  "homepage": "https://github.com/fernandobayit/MeshCentral-ScriptTask",
+  "changelogUrl": "https://raw.githubusercontent.com/fernandobayit/MeshCentral-ScriptTask/master/changelog.md",
+  "configUrl": "https://raw.githubusercontent.com/fernandobayit/MeshCentral-ScriptTask/master/config.json",
+  "downloadUrl": "https://github.com/fernandobayit/MeshCentral-ScriptTask/archive/master.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fernandobayit/MeshCentral-ScriptTask.git"
+  },
+  "versionHistoryUrl": "https://api.github.com/repos/fernandobayit/MeshCentral-ScriptTask/tags",
+  "meshCentralCompat": ">=1.1.35"
+}

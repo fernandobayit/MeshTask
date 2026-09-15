@@ -850,7 +850,7 @@ parent.pluginHandler.scripttask.loadSchedule = function(message) {
                 var targetTxt = (nh.filter != null && nh.filter !== '')
                     ? '<span class="stCellMono" title="Filtro dinâmico — reavaliado a cada execução">🎯 ' + esc(nh.filter) + '</span>'
                     : esc(nNames[nh.node] || nh.node || '');
-                var schedName = nh.command ? ('⚡ ' + nh.command.substring(0, 40)) : (sNames[nh.scriptId] || nh.scriptId || '');
+                var schedName = nh.command ? ('⚡ ' + nh.command.substring(0, 40)) : (sNames[nh.scriptId] || (nh.scriptId ? '(script removido: ' + nh.scriptId.substring(0,6) + '…)' : '—'));
                 tr.innerHTML = '<td>' + targetTxt + '</td><td>' + esc(schedName) + '</td><td>' + esc(nh.scheduledBy || '') + '</td><td>' + nh.everyTxt + '</td><td>' + nh.startedTxt + '</td><td>' + nh.endingTxt + '</td><td>' + nh.lastRunTxt + '</td><td>' + nh.nextRunTxt + '</td><td>' + nh.actionTxt + '</td>';
                 if (nh.command) tr.title = '⚡ ' + nh.command;
                 tr.classList.add('stNSRow');

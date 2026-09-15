@@ -230,11 +230,7 @@
         </div>
         <div class="mtSectionTitle">🎯 Alvos</div>
         <div class="mtTargetMode">
-          <label><input type="radio" name="mttarget" value="devices" checked onchange="mtTargetMode('devices');"> Dispositivos selecionados (<span id="mtSelCount">0</span>)</label>
-          <label><input type="radio" name="mttarget" value="filter" onchange="mtTargetMode('filter');"> Filtro dinâmico — reavaliado a cada execução</label>
-        </div>
-        <div id="mtDeviceList"></div>
-        <div id="mtFilterBox" style="display:none;">
+          <div id="mtFilterBox">
           <input type="text" id="mtFilterInput" oninput="mtPreviewDebounced();" placeholder="ex.: os:linux and g:servers and !t:homolog" />
           <div class="mtFilterHelp">
             <code>os:linux</code> sistema (famílias expandem) ·
@@ -629,30 +625,10 @@ function mtSchedOpenFor(scriptId, scriptDoc) {
     Q('mtEndNever').checked = true;
     Q('mtFilterInput').value = '';
     QV('mtPreviewBox', false); QV('mtPreviewSummary', false); QV('mtPreviewErr', false);
-    var defCtx = mtGlobalNode();
-    mtSchedNodes = (defCtx && defCtx._id) ? [defCtx._id] : [];
-    renderSchedDeviceList();
-    Q('mtSchedOverlay').querySelector('input[value=devices]').checked = true;
-    mtTargetMode('devices');
     QV('mtSchedOverlay', true);
 }
 function mtSchedClose() { QV('mtSchedOverlay', false); mtSchedIsCommand = false; }
-function renderSchedDeviceList() {
-    var box = Q('mtDeviceList');
-    box.innerHTML = '';
-    var nNames = {};
-    parent.nodes.forEach(function (n) { nNames[n._id] = n.name; });
-    mtSchedNodes.forEach(function (nid) {
-        var label = document.createElement('label');
-        label.textContent = '📍 ' + (nNames[nid] || nid);
-        box.appendChild(label);
-    });
-    Q('mtSelCount').textContent = mtSchedNodes.length;
-}
-function mtTargetMode(mode) {
-    QV('mtFilterBox', mode == 'filter');
-    QV('mtDeviceList', mode == 'devices');
-}
+
 function mtRecurSelected(v) {
     QV('mtRowInterval', v != 'once');
     QV('mtRowEnd', v != 'once');
@@ -696,21 +672,12 @@ function mtSchedSave() {
         document.getElementsByName('mtrdays').forEach(function (de) { if (de.checked) o.dayVals.push(de.value); });
         if (o.dayVals.length == 0) { mtToast('Selecione ao menos um dia da semana.', 'err'); return; }
     }
-    var modeEls = document.getElementsByName('mttarget');
-    var mode = 'devices';
-    modeEls.forEach(function (el) { if (el.checked) mode = el.value; });
-    if (mode == 'filter') {
-        var f = Q('mtFilterInput').value.trim();
-        if (f == '') { mtToast('Informe um filtro de dispositivos.', 'err'); return; }
-        o.filter = f;
-        o.nodes = null;
-    } else {
-        o.nodes = mtSchedNodes;
-        if (!o.nodes || o.nodes.length == 0) { mtToast('Selecione ao menos um dispositivo.', 'err'); return; }
-    }
+    var f = Q('mtFilterInput').value.trim();
+    if (f == '') { mtToast('Informe um filtro de dispositivos.', 'err'); return; }
+    o.filter = f;
     var payload = {
         action: 'plugin', plugin: 'scripttask', pluginaction: 'addScheduledJob',
-        nodes: o.nodes, filter: o.filter || null,
+        nodes: null, filter: o.filter,
         currentNodeId: (mtGlobalNode() || {})._id, schedule: o
     };
     if (mtSchedIsCommand) {
@@ -735,10 +702,10 @@ parent.pluginHandler.scripttask.previewTargetsResult = function (message) {
         cmdList.innerHTML = '';
         var nOn = 0;
         (ev.targets || []).forEach(function (tgt) {
-            var lbl = parent.document.createElement('label');
-            lbl.style.cssText = 'display:block; margin:2px 0;';
-            lbl.innerHTML = '<input type="checkbox" class="mtcmdchk" value="' + tgt.nodeid + '" checked /> ' + esc(tgt.name) + ' <span class="mtHint">[' + esc(tgt.osdesc || '?') + ']</span> ' + (tgt.online ? '●' : '○');
-            cmdList.appendChild(lbl);
+            var div = parent.document.createElement('div');
+            div.style.cssText = 'margin:2px 0; font-size:12px;';
+            div.innerHTML = (tgt.online ? '<span style="color:#4a4;">●</span> ' : '<span style="color:#999;">○</span> ') + esc(tgt.name) + ' <span class="mtHint">[' + esc(tgt.osdesc || '?') + ']</span>';
+            cmdList.appendChild(div);
             if (tgt.online) nOn++;
         });
         cmdSum.innerHTML = '<b>' + esc(ev.describe || ev.filter) + '</b> → ' + (ev.targets ? ev.targets.length : 0) + ' dispositivo(s), ' + nOn + ' online';
@@ -1033,7 +1000,6 @@ function mtCmdOpen() {
         '<input type="text" id="mtcmdfilter" oninput="mtCmdPreviewDebounced();" style="width:100%; margin:4px 0; padding:5px; border:1px solid #AAA; border-radius:3px; font-family:Consolas,monospace;" placeholder="Digite um filtro para ver os dispositivos que casam..." />' +
         '<div id="mtCmdPreviewSummary" style="font-size:12px; color:#333; margin:4px 0;"></div>' +
         '<div id="mtCmdPreviewBox" style="max-height:120px; overflow-y:auto; border:1px solid #DDD; border-radius:3px; padding:4px 8px;">' +
-        '<label style="display:block; margin:2px 0; font-weight:bold;"><input type="checkbox" id="mtCmdSelAll" onchange="mtCmdSelAllChange(this);" /> Selecionar todos</label>' +
         '<div id="mtCmdPreviewList" style="margin-top:4px;"></div>' +
         '</div>' +
         '<div style="margin-top:10px;"><b>Quando executar:</b></div>' +
@@ -1060,9 +1026,6 @@ function mtCmdPreviewRun() {
     sum.innerHTML = '<span class="mtHint">Buscando...</span>';
     parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'previewTargets', filter: f });
 }
-function mtCmdSelAllChange(el) {
-    parent.document.querySelectorAll('.mtcmdchk').forEach(function (c) { c.checked = el.checked; });
-}
 function mtCmdWhenChange(el) {
     parent.document.getElementById('mtCmdCustomTime').style.display = (el.value == 'custom') ? '' : 'none';
 }
@@ -1070,9 +1033,8 @@ function mtCmdAdvancedEx() {
     var cmd = parent.document.getElementById('mtcmdtext').value;
     var type = parent.document.getElementById('mtcmdtype').value;
     var filter = parent.document.getElementById('mtcmdfilter').value.trim();
-    var sel = [];
-    parent.document.querySelectorAll('.mtcmdchk').forEach(function (c) { if (c.checked) sel.push(c.value); });
     if (!cmd.trim()) { mtToast('Digite o comando.', 'err'); return; }
+    if (!filter) { mtToast('Digite um filtro de dispositivos.', 'err'); return; }
     var whenEls = parent.document.getElementsByName('mtcmdwhen');
     var when = 'now';
     whenEls.forEach(function (el) { if (el.checked) when = el.value; });
@@ -1100,14 +1062,7 @@ function mtCmdAdvancedEx() {
 
     // Execução imediata ou agendada única
     if (when == 'now') {
-        // Se tem filtro → runCommand com filter; senão → runCommand com nodes
-        if (filter) {
-            parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'runCommand', cmd: cmd, filetype: type, filter: filter, currentNodeId: (mtGlobalNode() || {})._id });
-        } else if (sel.length > 0) {
-            parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'runCommand', cmd: cmd, filetype: type, nodes: sel, currentNodeId: (mtGlobalNode() || {})._id });
-        } else {
-            mtToast('Digite um filtro ou selecione dispositivos.', 'err'); return;
-        }
+        parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'runCommand', cmd: cmd, filetype: type, filter: filter, currentNodeId: (mtGlobalNode() || {})._id });
         mtToast('Comando enfileirado.', 'ok');
         mtShowTab('history', Q('mtTabs').querySelectorAll('span')[2]);
     } else {
@@ -1121,8 +1076,7 @@ function mtCmdAdvancedEx() {
         parent.meshserver.send({
             action: 'plugin', plugin: 'scripttask', pluginaction: 'addScheduledJob',
             command: cmd, commandType: type,
-            filter: filter || null,
-            nodes: (filter ? null : sel),
+            filter: filter, nodes: null,
             schedule: { recur: 'once', startAt: startAt, endAt: null }
         });
         mtToast('Comando agendado.', 'ok');

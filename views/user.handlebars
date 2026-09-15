@@ -1014,7 +1014,7 @@ function mtCmdAdvancedEx() {
     var cmd = parent.document.getElementById('mtcmdtext').value;
     var type = parent.document.getElementById('mtcmdtype').value;
     var sel = [];
-    document.querySelectorAll('.mtcmdchk').forEach(function (c) { if (c.checked) sel.push(c.value); });
+    parent.document.querySelectorAll('.mtcmdchk').forEach(function (c) { if (c.checked) sel.push(c.value); });
     if (!cmd.trim()) { mtToast('Digite o comando.', 'err'); return; }
     if (sel.length == 0) { mtToast('Selecione ao menos um dispositivo.', 'err'); return; }
     parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'runCommand', cmd: cmd, filetype: type, nodes: sel, currentNodeId: (mtGlobalNode() || {})._id });

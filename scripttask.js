@@ -702,19 +702,32 @@ module.exports.scripttask = function (parent) {
                 // Ad-hoc command execution without storing a script in the tree.
                 // Creates an ephemeral script doc, queues jobs; the script is deleted
                 // automatically when its job completes (jobComplete sees the flag).
+                // 0.1.12: accepts filter (resolves targets dynamically) in addition to nodes.
                 var cmdContent = String(command.cmd || '');
                 var cmdType = String(command.filetype || 'bash');
-                var cmdNode = command.nodes;
+                var cmdNodes = command.nodes;
+                var cmdFilter = (command.filter != null && typeof command.filter == 'string' && command.filter.trim() != '') ? command.filter.trim() : null;
                 if (!cmdContent.trim()) break;
                 if (cmdType == 'bash') cmdContent = cmdContent.split('\r\n').join('\n');
                 obj.db.addScript('cmd-' + Math.floor(Date.now() / 1000) + '.' + cmdType, cmdContent, 'Shared', cmdType)
                     .then(function (created) { return obj.db.update(created._id, { ephemeral: true }).then(function () { return created; }); })
                     .then(function (s) {
-                        var nodes = Array.isArray(cmdNode) ? cmdNode : [cmdNode];
-                        var proms = nodes.map(function (n) { return obj.db.addJob({ scriptId: s._id, node: n, runBy: user.name }); });
-                        return Promise.all(proms).then(function () { return obj.db.updateScriptJobName(s._id, s.name); });
+                        if (cmdFilter) {
+                            // Resolve filter to target nodes dynamically
+                            obj.resolveFilterTargets(cmdFilter, function (ids) {
+                                if (!ids.length) { obj.consoleLog('runCommand filter matched 0 devices: ' + cmdFilter); return; }
+                                var proms = ids.map(function (nid) { return obj.db.addJob({ scriptId: s._id, node: nid, runBy: user.name }); });
+                                Promise.all(proms).then(function () { return obj.db.updateScriptJobName(s._id, s.name); })
+                                    .then(function () { obj.resetQueueTimer(); obj.queueRun(); })
+                                    .catch(function (e) { obj.consoleLog('runCommand filter error: ' + e); });
+                            });
+                        } else {
+                            var nodes = Array.isArray(cmdNodes) ? cmdNodes : [cmdNodes];
+                            var proms = nodes.map(function (n) { return obj.db.addJob({ scriptId: s._id, node: n, runBy: user.name }); });
+                            return Promise.all(proms).then(function () { return obj.db.updateScriptJobName(s._id, s.name); });
+                        }
                     })
-                    .then(function () { obj.resetQueueTimer(); obj.queueRun(); })
+                    .then(function () { if (!cmdFilter) { obj.resetQueueTimer(); obj.queueRun(); } })
                     .catch(function (e) { obj.consoleLog('runCommand error: ' + e); });
                 break;
             }

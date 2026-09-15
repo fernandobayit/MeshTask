@@ -734,7 +734,7 @@ module.exports.scripttask = function (parent) {
 
             // ---------- edit ----------
             case 'editScript': {
-                obj.db.update(command.scriptId, { type: command.scriptType, name: command.scriptName, content: command.scriptContent })
+                obj.db.update(command.scriptId, { filetype: command.scriptType, name: command.scriptName, content: command.scriptContent })
                     .then(function () { obj.updateFrontEnd({ scriptId: command.scriptId, tree: true }); })
                     .catch(function (e) { obj.consoleLog('editScript error: ' + e); });
                 break;

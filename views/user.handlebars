@@ -86,11 +86,13 @@
 
     /* ---- agendador ---- */
     #mtSchedOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 110; align-items: center; justify-content: center; }
-    #mtSchedBox { background: #FFF; width: 760px; max-width: 94vw; max-height: 90vh; overflow-y: auto; border: 1px solid #888; border-radius: 5px; box-shadow: 0 6px 30px rgba(0,0,0,0.35); }
-    #mtSchedHead { padding: 9px 14px; background: #DDD; border-bottom: 1px solid #AAA; border-radius: 5px 5px 0 0; font-weight: bold; display: flex; }
-    #mtSchedHead b { flex: 1; }
-    #mtSchedBody { padding: 12px 16px; }
-    #mtSchedFoot { padding: 10px 14px; border-top: 1px solid #DDD; text-align: right; }
+    #mtCmdOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 110; display: none; align-items: center; justify-content: center; }
+    #mtCmdOverlay:not([style*="display:none"]) { display: flex; }
+    .mtOvlBox { background: #FFF; width: 760px; max-width: 94vw; max-height: 90vh; overflow-y: auto; border: 1px solid #888; border-radius: 5px; box-shadow: 0 6px 30px rgba(0,0,0,0.35); }
+    .mtOvlHead { padding: 9px 14px; background: #DDD; border-bottom: 1px solid #AAA; border-radius: 5px 5px 0 0; font-weight: bold; display: flex; }
+    .mtOvlHead b { flex: 1; }
+    .mtOvlBody { padding: 12px 16px; }
+    .mtOvlFoot { padding: 10px 14px; border-top: 1px solid #DDD; text-align: right; }
     .mtFormRow { margin: 9px 0; }
     .mtFormRow > label:first-child { display: inline-block; width: 90px; font-weight: bold; color: #555; }
     .mtFormRow input[type=text], .mtFormRow input[type=number], .mtFormRow select {
@@ -200,9 +202,9 @@
 
   <!-- ===== agendador ===== -->
   <div id="mtSchedOverlay" style="display:none;">
-    <div id="mtSchedBox">
-      <div id="mtSchedHead"><b id="mtSchedHeadTitle">Agendar execução</b><span class="mtBtn" onclick="mtSchedClose();">✕</span></div>
-      <div id="mtSchedBody">
+    <div id="mtSchedBox" class="mtOvlBox">
+      <div id="mtSchedHead" class="mtOvlHead"><b id="mtSchedHeadTitle">Agendar execução</b><span class="mtBtn" onclick="mtSchedClose();">✕</span></div>
+      <div id="mtSchedBody" class="mtOvlBody">
         <div class="mtFormRow"><label>Conteúdo:</label><span id="mtSchedScriptName" style="font-weight:bold;"></span></div>
         <div class="mtFormRow" id="mtSchedRecurRow">
           <label>Repetir:</label>
@@ -247,7 +249,7 @@
           </div>
         </div>
       </div>
-      <div id="mtSchedFoot">
+      <div id="mtSchedFoot" class="mtOvlFoot">
         <span class="mtBtn" onclick="mtSchedClose();">Cancelar</span>
         <span class="mtBtn primary" onclick="mtSchedSave();">✅ Agendar</span>
       </div>
@@ -255,9 +257,9 @@
   </div>
 
   <div id="mtCmdOverlay" style="display:none;">
-    <div id="mtSchedBox">
-      <div id="mtSchedHead"><b id="mtCmdHeadTitle">⚡ Executar comando</b><span class="mtBtn" onclick="mtCmdClose();">✕</span></div>
-      <div id="mtSchedBody">
+    <div id="mtCmdBox" class="mtOvlBox">
+      <div id="mtCmdHead" class="mtOvlHead"><b id="mtCmdHeadTitle">⚡ Executar comando</b><span class="mtBtn" onclick="mtCmdClose();">✕</span></div>
+      <div id="mtCmdBody" class="mtOvlBody">
         <div class="mtFormRow"><label>Comando:</label><textarea id="mtCmdText" style="width:100%; height:80px; font-family:Consolas,monospace; border:1px solid #AAA; border-radius:3px; padding:5px;" placeholder="ex.: echo novo_arquivo.txt"></textarea></div>
         <div class="mtFormRow"><label>Tipo:</label>
           <select id="mtCmdType" style="padding:3px 6px; border:1px solid #AAA; border-radius:3px;">
@@ -304,7 +306,7 @@
           </div>
         </div>
       </div>
-      <div id="mtSchedFoot">
+      <div id="mtCmdFoot" class="mtOvlFoot">
         <span class="mtBtn" onclick="mtCmdClose();">Cancelar</span>
         <span class="mtBtn primary" onclick="mtCmdSave();">⚡ Executar</span>
       </div>
@@ -1062,6 +1064,10 @@ function mtCmdOpen() {
     QV('mtCmdOverlay', true);
 }
 function mtCmdClose() { QV('mtCmdOverlay', false); }
+function mtCmdEndNeverChanged() {
+    var n = Q('mtCmdEndNever').checked;
+    Q('mtCmdEndDate').disabled = n; Q('mtCmdEndTime').disabled = n;
+}
 function mtCmdRecurSelected(v) {
     QV('mtCmdRowInterval', v != 'once');
     QV('mtCmdRowEnd', v != 'once');

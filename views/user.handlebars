@@ -254,6 +254,62 @@
     </div>
   </div>
 
+  <div id="mtCmdOverlay" style="display:none;">
+    <div id="mtSchedBox">
+      <div id="mtSchedHead"><b id="mtCmdHeadTitle">⚡ Executar comando</b><span class="mtBtn" onclick="mtCmdClose();">✕</span></div>
+      <div id="mtSchedBody">
+        <div class="mtFormRow"><label>Comando:</label><textarea id="mtCmdText" style="width:100%; height:80px; font-family:Consolas,monospace; border:1px solid #AAA; border-radius:3px; padding:5px;" placeholder="ex.: echo novo_arquivo.txt"></textarea></div>
+        <div class="mtFormRow"><label>Tipo:</label>
+          <select id="mtCmdType" style="padding:3px 6px; border:1px solid #AAA; border-radius:3px;">
+            <option value="bash">Bash</option><option value="bat">BAT (Windows)</option><option value="ps1">PowerShell</option>
+          </select>
+        </div>
+        <div class="mtFormRow" id="mtCmdRecurRow">
+          <label>Repetir:</label>
+          <span>
+            <label><input type="radio" name="mtcmdrecur" value="once" checked onchange="mtCmdRecurSelected('once');"> Uma vez (imediato se Início = agora)</label>
+            <label><input type="radio" name="mtcmdrecur" value="minutes" onchange="mtCmdRecurSelected('minutes');"> A cada minutos</label>
+            <label><input type="radio" name="mtcmdrecur" value="hourly" onchange="mtCmdRecurSelected('hourly');"> A cada horas</label>
+            <label><input type="radio" name="mtcmdrecur" value="daily" onchange="mtCmdRecurSelected('daily');"> Diariamente</label>
+            <label><input type="radio" name="mtcmdrecur" value="weekly" onchange="mtCmdRecurSelected('weekly');"> Semanalmente</label>
+          </span>
+        </div>
+        <div class="mtFormRow"><label>Início:</label><input type="text" id="mtCmdStartDate" style="width:130px" placeholder="AAAA-MM-DD" /> <input type="text" id="mtCmdStartTime" style="width:70px" placeholder="HH:MM" /></div>
+        <div class="mtFormRow" id="mtCmdRowInterval" style="display:none;"><label>A cada:</label><input type="number" id="mtCmdInterval" value="1" min="1" style="width:70px" /> <span id="mtCmdIntervalHint"></span></div>
+        <div class="mtFormRow" id="mtCmdRowEnd" style="display:none;"><label>Termina:</label><input type="text" id="mtCmdEndDate" style="width:130px" placeholder="AAAA-MM-DD" /> <input type="text" id="mtCmdEndTime" style="width:70px" placeholder="HH:MM" /> <label><input type="checkbox" id="mtCmdEndNever" checked onchange="mtCmdEndNeverChanged();"> nunca</label></div>
+        <div class="mtFormRow" id="mtCmdRowDays" style="display:none;"><label>Dias:</label>
+          <span>
+            <label><input type="checkbox" name="mtcmddays" value="0">Dom</label>
+            <label><input type="checkbox" name="mtcmddays" value="1">Seg</label>
+            <label><input type="checkbox" name="mtcmddays" value="2">Ter</label>
+            <label><input type="checkbox" name="mtcmddays" value="3">Qua</label>
+            <label><input type="checkbox" name="mtcmddays" value="4">Qui</label>
+            <label><input type="checkbox" name="mtcmddays" value="5">Sex</label>
+            <label><input type="checkbox" name="mtcmddays" value="6">Sáb</label>
+          </span>
+        </div>
+        <div class="mtSectionTitle">🎯 Alvos</div>
+        <div>
+          <input type="text" id="mtCmdFilterInput" oninput="mtCmdPreviewDebounced();" placeholder="ex.: os:linux and g:servers and !t:homolog" />
+          <div class="mtFilterHelp">
+            <code>os:linux</code> sistema · <code>g:</code> grupo · <code>t:</code> tag · <code>u:</code> usuário ·
+            <code>desc:</code> descrição · <code>ip:</code> IP · <code>c:online/offline</code> ·
+            <code>!</code> negação · <code>and</code>/<code>or</code> · texto = nome.
+          </div>
+          <div style="margin-top:6px;"><span class="mtBtn" onclick="mtCmdPreviewRun();">👁 Visualizar alvos</span></div>
+          <div id="mtCmdPreviewErr" style="font-size:12px; color:#c0392b; margin-top:6px;"></div>
+          <div id="mtCmdPreviewSummary" style="font-size:12px; color:#333; margin-top:6px;"></div>
+          <div id="mtCmdPreviewBox" style="margin-top:6px; border:1px solid #DDD; border-radius:3px; max-height:200px; overflow-y:auto; display:none;">
+            <table class="mtTbl" style="margin:0;"><thead><tr><th>Dispositivo</th><th>Grupo</th><th>OS</th><th>Online</th></tr></thead><tbody id="mtCmdPreviewBody"></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="mtSchedFoot">
+        <span class="mtBtn" onclick="mtCmdClose();">Cancelar</span>
+        <span class="mtBtn primary" onclick="mtCmdSave();">⚡ Executar</span>
+      </div>
+    </div>
+  </div>
   <div id="mtToast"></div>
 </div>
 </body>
@@ -694,21 +750,23 @@ function mtSchedSave() {
 // ===== resposta do preview (server dispatch → aqui) =====
 parent.pluginHandler.scripttask.previewTargetsResult = function (message) {
     var ev = (message.event || message);
-    // 0.1.12: também atualizar o dialog de Executar Comando (preview de filtro)
-    var cmdList = parent.document.getElementById('mtCmdPreviewList');
-    if (cmdList) {
-        var cmdSum = parent.document.getElementById('mtCmdPreviewSummary');
-        if (ev.error) { cmdSum.innerHTML = '<span style="color:#c0392b;">⚠ ' + esc(ev.error) + '</span>'; cmdList.innerHTML = ''; return; }
-        cmdList.innerHTML = '';
+    // 0.1.12: atualizar o overlay de Executar Comando
+    var cmdBox = document.getElementById('mtCmdPreviewBody');
+    if (cmdBox && Q('mtCmdOverlay') && Q('mtCmdOverlay').style.display != 'none') {
+        if (ev.error) { QH('mtCmdPreviewErr', '⚠ ' + esc(ev.error)); QV('mtCmdPreviewErr', true); QV('mtCmdPreviewBox', false); QV('mtCmdPreviewSummary', false); return; }
+        QV('mtCmdPreviewErr', false);
+        cmdBox.innerHTML = '';
         var nOn = 0;
-        (ev.targets || []).forEach(function (tgt) {
-            var div = parent.document.createElement('div');
-            div.style.cssText = 'margin:2px 0; font-size:12px;';
-            div.innerHTML = (tgt.online ? '<span style="color:#4a4;">●</span> ' : '<span style="color:#999;">○</span> ') + esc(tgt.name) + ' <span class="mtHint">[' + esc(tgt.osdesc || '?') + ']</span>';
-            cmdList.appendChild(div);
+        ev.targets.forEach(function (tgt) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + esc(tgt.name) + '</td><td>' + esc(tgt.group || '') + '</td><td class="stCellMono">' + esc(tgt.osdesc || '') + '</td>' +
+                '<td>' + (tgt.online ? '<span class="stStatus ok">● online</span>' : '<span class="stStatus que">○ offline</span>') + '</td>';
+            cmdBox.appendChild(tr);
             if (tgt.online) nOn++;
         });
-        cmdSum.innerHTML = '<b>' + esc(ev.describe || ev.filter) + '</b> → ' + (ev.targets ? ev.targets.length : 0) + ' dispositivo(s), ' + nOn + ' online';
+        QV('mtCmdPreviewBox', true);
+        QV('mtCmdPreviewSummary', true);
+        QH('mtCmdPreviewSummary', '<b>' + esc(ev.describe || ev.filter) + '</b> → ' + ev.targets.length + ' dispositivo(s), ' + nOn + ' online agora');
         return;
     }
     if (Q('mtSchedOverlay').style.display == 'none') return; // agendador fechado
@@ -989,97 +1047,81 @@ function delVar(el) {
 }
 
 // ===== ⚡ executar comando ad-hoc =====
-var mtCmdPreviewTimer = null;
 function mtCmdOpen() {
-    var html =
-        '<b>Comando</b> (script temporário, não salvo na árvore):<br />' +
-        '<textarea id="mtcmdtext" style="width:100%; height:80px; font-family:Consolas,monospace; margin:6px 0; border:1px solid #AAA; border-radius:3px; padding:5px;" placeholder="ex.: echo novo_arquivo.txt"></textarea>' +
-        'Tipo: <select id="mtcmdtype" style="padding:3px 6px; border:1px solid #AAA; border-radius:3px;">' +
-        '<option value="bash">Bash</option><option value="bat">BAT</option><option value="ps1">PowerShell</option></select>' +
-        '<div style="margin-top:10px;"><b>Filtro de dispositivos</b> <span class="mtHint">(ex.: os:linux, BZP-, u:admin, os:windows and !t:homolog)</span></div>' +
-        '<input type="text" id="mtcmdfilter" oninput="mtCmdPreviewDebounced();" style="width:100%; margin:4px 0; padding:5px; border:1px solid #AAA; border-radius:3px; font-family:Consolas,monospace;" placeholder="Digite um filtro para ver os dispositivos que casam..." />' +
-        '<div id="mtCmdPreviewSummary" style="font-size:12px; color:#333; margin:4px 0;"></div>' +
-        '<div id="mtCmdPreviewBox" style="max-height:120px; overflow-y:auto; border:1px solid #DDD; border-radius:3px; padding:4px 8px;">' +
-        '<div id="mtCmdPreviewList" style="margin-top:4px;"></div>' +
-        '</div>' +
-        '<div style="margin-top:10px;"><b>Quando executar:</b></div>' +
-        '<label style="display:block; margin:4px 0;"><input type="radio" name="mtcmdwhen" value="now" checked onchange="mtCmdWhenChange(this);" /> Agora (imediato)</label>' +
-        '<label style="display:block; margin:4px 0;"><input type="radio" name="mtcmdwhen" value="30min" onchange="mtCmdWhenChange(this);" /> Em 30 minutos</label>' +
-        '<label style="display:block; margin:4px 0;"><input type="radio" name="mtcmdwhen" value="custom" onchange="mtCmdWhenChange(this);" /> Personalizado</label>' +
-        '<div id="mtCmdCustomTime" style="display:none; margin:6px 0;">Data: <input type="date" id="mtCmdDate" style="padding:3px;" /> Hora: <input type="time" id="mtCmdTime" style="padding:3px;" /></div>' +
-        '<label style="display:block; margin:6px 0;"><input type="checkbox" id="mtCmdRecurring" /> <b>Recorrente</b> (repetir: <input type="number" id="mtCmdInterval" value="60" min="1" style="width:50px; padding:2px;" /> min) — o filtro é reavaliado a cada execução</label>';
-    parent.setDialogMode(2, "⚡ Executar comando", 3, mtCmdAdvancedEx, html);
+    Q('mtCmdText').value = '';
+    Q('mtCmdFilterInput').value = '';
+    QV('mtCmdPreviewBox', false); QV('mtCmdPreviewSummary', false); QV('mtCmdPreviewErr', false);
+    Q('mtCmdRecurRow').querySelector('input[value=once]').checked = true;
+    mtCmdRecurSelected('once');
     var d = new Date();
-    parent.document.getElementById('mtCmdDate').value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    parent.document.getElementById('mtCmdTime').value = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-    setTimeout(function () { try { parent.focusTextBox('mtcmdtext'); } catch (e) { } }, 50);
+    Q('mtCmdStartDate').value = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    Q('mtCmdStartTime').value = d.getHours() + ':' + d.getMinutes();
+    Q('mtCmdEndDate').value = '';
+    Q('mtCmdEndTime').value = '';
+    Q('mtCmdEndNever').checked = true;
+    QV('mtCmdOverlay', true);
 }
+function mtCmdClose() { QV('mtCmdOverlay', false); }
+function mtCmdRecurSelected(v) {
+    QV('mtCmdRowInterval', v != 'once');
+    QV('mtCmdRowEnd', v != 'once');
+    QV('mtCmdRowDays', v == 'weekly');
+    var hints = { minutes: 'minuto(s)', hourly: 'hora(s)', daily: 'dia(s)', weekly: 'semana(s)' };
+    QH('mtCmdIntervalHint', hints[v] || '');
+}
+var mtCmdPreviewTimer = null;
 function mtCmdPreviewDebounced() {
     clearTimeout(mtCmdPreviewTimer);
     mtCmdPreviewTimer = setTimeout(mtCmdPreviewRun, 500);
 }
 function mtCmdPreviewRun() {
-    var f = parent.document.getElementById('mtcmdfilter').value.trim();
-    var sum = parent.document.getElementById('mtCmdPreviewSummary');
-    var list = parent.document.getElementById('mtCmdPreviewList');
-    if (f == '') { sum.innerHTML = '<span class="mtHint">Digite um filtro para ver os dispositivos</span>'; list.innerHTML = ''; return; }
-    sum.innerHTML = '<span class="mtHint">Buscando...</span>';
+    var f = Q('mtCmdFilterInput').value.trim();
+    if (f == '') { QV('mtCmdPreviewBox', false); QV('mtCmdPreviewSummary', false); QV('mtCmdPreviewErr', false); return; }
+    QH('mtCmdPreviewErr', ''); QV('mtCmdPreviewErr', false);
+    QH('mtCmdPreviewSummary', 'Buscando...');
     parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'previewTargets', filter: f });
 }
-function mtCmdWhenChange(el) {
-    parent.document.getElementById('mtCmdCustomTime').style.display = (el.value == 'custom') ? '' : 'none';
-}
-function mtCmdAdvancedEx() {
-    var cmd = parent.document.getElementById('mtcmdtext').value;
-    var type = parent.document.getElementById('mtcmdtype').value;
-    var filter = parent.document.getElementById('mtcmdfilter').value.trim();
+function mtCmdSave() {
+    var cmd = Q('mtCmdText').value;
+    var type = Q('mtCmdType').value;
+    var filter = Q('mtCmdFilterInput').value.trim();
     if (!cmd.trim()) { mtToast('Digite o comando.', 'err'); return; }
-    if (!filter) { mtToast('Digite um filtro de dispositivos.', 'err'); return; }
-    var whenEls = parent.document.getElementsByName('mtcmdwhen');
-    var when = 'now';
-    whenEls.forEach(function (el) { if (el.checked) when = el.value; });
-    var recurring = parent.document.getElementById('mtCmdRecurring').checked;
-    var interval = Number(parent.document.getElementById('mtCmdInterval').value) || 60;
-
-    // Se tem filtro e quer recorrente → addScheduledJob com filter + command
-    if (recurring && filter) {
-        var startAt;
-        if (when == 'now') startAt = Math.floor(Date.now() / 1000);
-        else if (when == '30min') startAt = Math.floor(Date.now() / 1000) + 1800;
+    if (!filter) { mtToast('Informe um filtro de dispositivos.', 'err'); return; }
+    var recurEls = document.getElementsByName('mtcmdrecur');
+    var recur = 'once';
+    recurEls.forEach(function (el) { if (el.checked) recur = el.value; });
+    var startAt = Date.parse(Q('mtCmdStartDate').value + ' ' + Q('mtCmdStartTime').value);
+    startAt = Math.floor(startAt / 1000);
+    if (isNaN(startAt)) { mtToast('Data/hora de início inválida.', 'err'); return; }
+    var o = { recur: recur, startAt: startAt };
+    if (recur != 'once') {
+        o.interval = Number(Q('mtCmdInterval').value) || 1;
+        if (Q('mtCmdEndNever').checked) o.endAt = null;
         else {
-            startAt = Math.floor(Date.parse(parent.document.getElementById('mtCmdDate').value + ' ' + parent.document.getElementById('mtCmdTime').value) / 1000);
-            if (isNaN(startAt)) { mtToast('Data/hora inválida.', 'err'); return; }
+            o.endAt = Date.parse(Q('mtCmdEndDate').value + ' ' + Q('mtCmdEndTime').value);
+            o.endAt = Math.floor(o.endAt / 1000);
+            if (isNaN(o.endAt)) { mtToast('Data/hora de fim inválida.', 'err'); return; }
         }
+    }
+    if (recur == 'weekly') {
+        o.dayVals = [];
+        document.getElementsByName('mtcmddays').forEach(function (de) { if (de.checked) o.dayVals.push(de.value); });
+        if (o.dayVals.length == 0) { mtToast('Selecione ao menos um dia da semana.', 'err'); return; }
+    }
+    var now = Math.floor(Date.now() / 1000);
+    if (recur == 'once' && startAt <= now) {
+        parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'runCommand', cmd: cmd, filetype: type, filter: filter, currentNodeId: (mtGlobalNode() || {})._id });
+        mtToast('Comando enfileirado.', 'ok');
+        mtCmdClose();
+        mtShowTab('history', Q('mtTabs').querySelectorAll('span')[2]);
+    } else {
         parent.meshserver.send({
             action: 'plugin', plugin: 'scripttask', pluginaction: 'addScheduledJob',
             command: cmd, commandType: type, filter: filter, nodes: null,
-            schedule: { recur: 'minutes', interval: interval, startAt: startAt, endAt: null }
-        });
-        mtToast('Agendamento recorrente criado (filtro reavaliado a cada ' + interval + ' min).', 'ok');
-        mtShowTab('schedule', Q('mtTabs').querySelectorAll('span')[1]);
-        return;
-    }
-
-    // Execução imediata ou agendada única
-    if (when == 'now') {
-        parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'runCommand', cmd: cmd, filetype: type, filter: filter, currentNodeId: (mtGlobalNode() || {})._id });
-        mtToast('Comando enfileirado.', 'ok');
-        mtShowTab('history', Q('mtTabs').querySelectorAll('span')[2]);
-    } else {
-        // Timing futuro → addScheduledJob once
-        var startAt;
-        if (when == '30min') startAt = Math.floor(Date.now() / 1000) + 1800;
-        else {
-            startAt = Math.floor(Date.parse(parent.document.getElementById('mtCmdDate').value + ' ' + parent.document.getElementById('mtCmdTime').value) / 1000);
-            if (isNaN(startAt)) { mtToast('Data/hora inválida.', 'err'); return; }
-        }
-        parent.meshserver.send({
-            action: 'plugin', plugin: 'scripttask', pluginaction: 'addScheduledJob',
-            command: cmd, commandType: type,
-            filter: filter, nodes: null,
-            schedule: { recur: 'once', startAt: startAt, endAt: null }
+            currentNodeId: (mtGlobalNode() || {})._id, schedule: o
         });
         mtToast('Comando agendado.', 'ok');
+        mtCmdClose();
         mtShowTab('schedule', Q('mtTabs').querySelectorAll('span')[1]);
     }
 }

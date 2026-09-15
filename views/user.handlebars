@@ -277,6 +277,18 @@ var mtSchedIsCommand = false;
 var mtSchedCommand = '';
 var mtSchedCommandType = 'bash';
 var mtIsGlobal = (window.location.search.indexOf('global=1') >= 0);
+// Wrapper: hide overlay when a native MC dialog opens, re-show on close.
+// MC dialogs use z-index:1000, our overlay at 999 would be behind them otherwise.
+(function () {
+    if (!mtIsGlobal) return;
+    var pset = parent.setDialogMode;
+    if (typeof pset !== 'function') return;
+    parent.setDialogMode = function (x, y, b, f, c, tag) {
+        var ov = parent.document.getElementById('mtGlobalOverlay');
+        if (ov) { ov.style.display = (x ? 'none' : 'flex'); }
+        return pset(x, y, b, f, c, tag);
+    };
+})();
 var mtSelectedDeviceId = null;
 
 function esc(s) {
@@ -1093,7 +1105,7 @@ function mtOpenGlobal() {
     if (ov) { ov.style.display = 'flex'; return; }
     ov = doc.createElement('div');
     ov.id = 'mtGlobalOverlay';
-    ov.style.cssText = 'display:flex; position:fixed; top:0; right:0; bottom:0; left:90px; background:rgba(0,0,0,0.55); z-index:1001; align-items:center; justify-content:center;';
+    ov.style.cssText = 'display:flex; position:fixed; top:0; right:0; bottom:0; left:90px; background:rgba(0,0,0,0.55); z-index:999; align-items:center; justify-content:center;';
     var box = doc.createElement('div');
     box.style.cssText = 'position:relative; width:calc(100% - 60px); height:calc(100% - 60px); background:#fff; border:1px solid #888; border-radius:6px; box-shadow:0 8px 40px rgba(0,0,0,0.5); overflow:hidden;';
     var close = doc.createElement('span');

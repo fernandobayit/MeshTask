@@ -762,7 +762,9 @@ parent.pluginHandler.scripttask.loadHistory = function(message) {
         rows.forEach(function(r) { r.parentNode.removeChild(r); });
         if (ev.nodeHistory.length) {
             ev.nodeHistory.forEach(function(nh) {
-                nh.latestTime = Math.max(nh.completeTime || 0, nh.queueTime || 0, nh.dispatchTime || 0, nh.dontQueueUntil || 0);
+                // 1.0.1: completed/errored jobs timestamp by completeTime — dontQueueUntil
+                // is a future date by design and made history rows show scheduled dates
+                nh.latestTime = (nh.completeTime != null) ? nh.completeTime : Math.max(nh.queueTime || 0, nh.dispatchTime || 0, nh.dontQueueUntil || 0);
             });
             ev.nodeHistory.sort((a, b) => (a.latestTime < b.latestTime) ? 1 : -1);
             ev.nodeHistory.forEach(function(nh) {
@@ -783,7 +785,9 @@ parent.pluginHandler.scripttask.loadHistory = function(message) {
             sHistTbl.style.display = '';
             QV('sHistEmpty', false);
             ev.scriptHistory.forEach(function(nh) {
-                nh.latestTime = Math.max(nh.completeTime || 0, nh.queueTime || 0, nh.dispatchTime || 0, nh.dontQueueUntil || 0);
+                // 1.0.1: completed/errored jobs timestamp by completeTime — dontQueueUntil
+                // is a future date by design and made history rows show scheduled dates
+                nh.latestTime = (nh.completeTime != null) ? nh.completeTime : Math.max(nh.queueTime || 0, nh.dispatchTime || 0, nh.dontQueueUntil || 0);
             });
             ev.scriptHistory.sort((a, b) => (a.latestTime < b.latestTime) ? 1 : -1);
             ev.scriptHistory.forEach(function(nh) {

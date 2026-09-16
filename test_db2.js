@@ -129,7 +129,7 @@ function section(s) { console.log('\n=== ' + s + ' ==='); }
     const oldv = await db3.getVariables();
     t('sem duplicação de variáveis', oldv.length == 1);
 
-    section('getStaleJobs — regra de timeout 3 min');
+    section('getStaleJobs — regra 1.0.1: timeout p/ despachados, fila espera agente');
     const nowT = Math.floor(Date.now() / 1000);
     const jStale1 = await db.addJob({ scriptId: s1._id, node: 'node//stale1' }); // dispatched 200s atrás
     await db.update(jStale1._id, { dispatchTime: nowT - 200 });
@@ -138,14 +138,22 @@ function section(s) { console.log('\n=== ' + s + ' ==='); }
     // simular queueTime antigo (addJob define queueTime=now)
     const jFresh = await db.addJob({ scriptId: s1._id, node: 'node//fresh' }); // despachado agora
     await db.update(jFresh._id, { dispatchTime: nowT });
-    const stale = await db.getStaleJobs(nowT, 180);
+    const stale = await db.getStaleJobs(nowT, 180, 7 * 86400);
     t('stale: dispatched antigo pego', stale.some(j => j._id == jStale1._id));
-    t('stale: nunca despachado + queueTime antigo é pego? (queueTime é agora — não)', !stale.some(j => j._id == jStale2._id));
+    t('stale: nunca despachado + fila recente NÃO pego (espera agente)', !stale.some(j => j._id == jStale2._id));
     t('stale: recente não pego', !stale.some(j => j._id == jFresh._id));
-    // forçar queueTime antigo no jStale2
-    await db.update(jStale2._id, { queueTime: nowT - 200 });
-    const stale2 = await db.getStaleJobs(nowT, 180);
-    t('stale: dispatchTime IS NULL + queueTime < limite → pego', stale2.some(j => j._id == jStale2._id));
+    // nunca despachado + elegível há 8 dias → expira
+    await db.update(jStale2._id, { queueTime: nowT - 8 * 86400, dontQueueUntil: nowT - 8 * 86400 });
+    const stale2 = await db.getStaleJobs(nowT, 180, 7 * 86400);
+    t('stale: nunca despachado + elegível > 7 dias → pego', stale2.some(j => j._id == jStale2._id));
+    // job agendado p/ futuro (dontQueueUntil futuro) NUNCA é stale, nem com queueTime antigo
+    const jFuture = await db.addJob({ scriptId: s1._id, node: 'node//future', dontQueueUntil: nowT + 4 * 86400 });
+    await db.update(jFuture._id, { queueTime: nowT - 200 });
+    const stale3 = await db.getStaleJobs(nowT, 180, 7 * 86400);
+    t('stale: dontQueueUntil futuro NUNCA pego (bug dos "Timeout" fantasma)', !stale3.some(j => j._id == jFuture._id));
+    // retrocompat: 2 args (sem queueExpirySec) não explode
+    const stale4 = await db.getStaleJobs(nowT, 180);
+    t('stale: chamada com 2 args funciona (default queueExpiry=timeout)', Array.isArray(stale4));
 
     section('persistência entre instâncias');
     const sPersist = await db.addScript('persist.sh', 'x', 'Shared', 'bash');

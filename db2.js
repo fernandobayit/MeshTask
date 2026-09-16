@@ -277,10 +277,13 @@ module.exports.CreateDB = function (meshserver) {
         };
 
         // 0.1.8: jobs dispatched > timeoutSec ago with no completion (stale)
-    // 0.1.10: also timeout jobs never dispatched (dispatchTime IS NULL) if queued > timeoutSec ago
-    obj.getStaleJobs = function (now, timeoutSec) {
+    // 1.0.1: never-dispatched jobs expire only after queueExpirySec (7 days) of
+    //        eligibility (past dontQueueUntil) — they wait for their agent to
+    //        reconnect; future-dated jobs (dontQueueUntil > now) are NEVER stale.
+    obj.getStaleJobs = function (now, timeoutSec, queueExpirySec) {
+        if (queueExpirySec == null) queueExpirySec = timeoutSec;
         return new Promise(function (resolve, reject) {
-            db.all("SELECT id, doc, completeTime, dispatchTime FROM docs WHERE type = 'job' AND completeTime IS NULL AND ((dispatchTime IS NOT NULL AND dispatchTime < $1) OR (dispatchTime IS NULL AND queueTime < $1))", { $1: now - timeoutSec }, function (err, rows) {
+            db.all("SELECT id, doc, completeTime, dispatchTime FROM docs WHERE type = 'job' AND completeTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $2) AND ((dispatchTime IS NOT NULL AND dispatchTime < $1) OR (dispatchTime IS NULL AND queueTime < $3))", { $1: now - timeoutSec, $2: now, $3: now - queueExpirySec }, function (err, rows) {
                 if (err) return reject(err);
                 resolve(rows.map(function (r) { return rowDoc(r); }));
             });

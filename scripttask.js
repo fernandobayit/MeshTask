@@ -32,6 +32,9 @@ module.exports.scripttask = function (parent) {
     // Job timeout (seconds): dispatched or queued longer than this with no
     // completion => marked as timed out on the next queueRun cycle.
     obj.JOB_TIMEOUT_SEC = 180;
+    // Never-dispatched jobs expire after this many seconds in the queue (7 days) —
+    // they wait indefinitely for their agent to reconnect, but not forever.
+    obj.QUEUE_EXPIRY_SEC = 7 * 86400;
 
     // Frontend hooks served via prepExports (browser-safe only — no obj./parent refs)
     obj.exports = [
@@ -215,29 +218,45 @@ module.exports.scripttask = function (parent) {
     // =====================================================================
     // QUEUE RUN — dispatch pending jobs, timeout stale ones, advance schedules
     // =====================================================================
+    // 1.0.1: dispatch pacing — send to at most MAX_DISPATCH_PER_RUN agents per
+    //        cycle so a filter matching ~1000 nodes doesn't stampede the server
+    //        and agents; leftovers queue for the next minute. Also re-check the
+    //        agent connection right before sending (list may be seconds old) and
+    //        leave the job pending if the agent dropped.
+    obj.MAX_DISPATCH_PER_RUN = 250;
     obj.queueRun = async function () {
         if (obj.db == null) return; // db not ready yet
+        var nowTime = Math.floor(Date.now() / 1000);
         var onlineAgents = Object.keys(obj.meshServer.webserver.wsagents);
 
-        // 1) Timeout stale jobs (3 minutes): dispatched >180s ago without completion,
-        //    OR queued >180s ago and never dispatched.
+        // 1) Timeout stale jobs:
+        //    - dispatched >180s ago without completion → agent got the job, never answered;
+        //    - never dispatched AND eligible (past dontQueueUntil) for >7 days → agent
+        //      never came back; expire so the schedule isn't jammed forever.
+        //    Future-dated jobs (dontQueueUntil in the future) are scheduled, not stale —
+        //    db.getStaleJobs filters them out.
         try {
-            var now = Math.floor(Date.now() / 1000);
-            var staleJobs = await obj.db.getStaleJobs(now, obj.JOB_TIMEOUT_SEC);
+            var staleJobs = await obj.db.getStaleJobs(nowTime, obj.JOB_TIMEOUT_SEC, obj.QUEUE_EXPIRY_SEC);
             if (staleJobs && staleJobs.length > 0) {
                 staleJobs.forEach(function (sj) {
+                    var msg = (sj.dispatchTime != null)
+                        ? 'Timeout: agent did not respond within ' + obj.JOB_TIMEOUT_SEC + ' seconds'
+                        : 'Expirado: agente offline — job não despachado após ' + Math.round(obj.QUEUE_EXPIRY_SEC / 86400) + ' dias na fila';
                     obj.consoleLog('timing out stale job ' + sj._id +
-                        ' (dispatched ' + (sj.dispatchTime ? (now - sj.dispatchTime) + 's ago' : 'never') + ')');
-                    obj.db.update(sj._id, { completeTime: now, errorVal: 'Timeout: agent did not respond within ' + obj.JOB_TIMEOUT_SEC + ' seconds' });
+                        ' (' + (sj.dispatchTime ? 'dispatched ' + (nowTime - sj.dispatchTime) + 's ago' : 'never dispatched, eligible since ' + Math.max(sj.queueTime || 0, sj.dontQueueUntil || 0)) + ')');
+                    obj.db.update(sj._id, { completeTime: nowTime, errorVal: msg });
                 });
             }
         } catch (e) { obj.consoleLog('stale cleanup error: ' + e); }
 
-        // 2) Dispatch pending jobs to online agents
+        // 2) Dispatch pending jobs to online agents (paced)
         try {
             var jobs = await obj.db.getPendingJobs(onlineAgents);
             if (jobs && jobs.length) {
+                jobs.sort(function (a, b) { return (a.queueTime || 0) - (b.queueTime || 0); }); // FIFO by enqueue time
+                jobs = jobs.slice(0, obj.MAX_DISPATCH_PER_RUN);
                 for (var i in jobs) {
+                    if (obj.meshServer.webserver.wsagents[jobs[i].node] == null) continue; // agent left — stays pending
                     try { await obj.dispatchJob(jobs[i]); } catch (e) { obj.consoleLog('Could not dispatch job: ' + e); }
                 }
             }

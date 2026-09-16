@@ -283,7 +283,10 @@ module.exports.CreateDB = function (meshserver) {
     obj.getStaleJobs = function (now, timeoutSec, queueExpirySec) {
         if (queueExpirySec == null) queueExpirySec = timeoutSec;
         return new Promise(function (resolve, reject) {
-            db.all("SELECT id, doc, completeTime, dispatchTime FROM docs WHERE type = 'job' AND completeTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $2) AND ((dispatchTime IS NOT NULL AND dispatchTime < $1) OR (dispatchTime IS NULL AND queueTime < $3))", { $1: now - timeoutSec, $2: now, $3: now - queueExpirySec }, function (err, rows) {
+            // Never-dispatched jobs expire 7 days after they become ELIGIBLE
+            // (baseline = max(queueTime, dontQueueUntil)) — a job queued months
+            // ahead of its slot waits for the slot, then 7 days for its agent.
+            db.all("SELECT id, doc, completeTime, dispatchTime FROM docs WHERE type = 'job' AND completeTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $2) AND ((dispatchTime IS NOT NULL AND dispatchTime < $1) OR (dispatchTime IS NULL AND queueTime < $3 AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') < $3)))", { $1: now - timeoutSec, $2: now, $3: now - queueExpirySec }, function (err, rows) {
                 if (err) return reject(err);
                 resolve(rows.map(function (r) { return rowDoc(r); }));
             });

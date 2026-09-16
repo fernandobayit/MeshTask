@@ -146,6 +146,12 @@ function section(s) { console.log('\n=== ' + s + ' ==='); }
     await db.update(jStale2._id, { queueTime: nowT - 8 * 86400, dontQueueUntil: nowT - 8 * 86400 });
     const stale2 = await db.getStaleJobs(nowT, 180, 7 * 86400);
     t('stale: nunca despachado + elegível > 7 dias → pego', stale2.some(j => j._id == jStale2._id));
+    // nunca despachado, agendado para daqui 115 dias → NÃO expira pelo queueTime antigo
+    // (expira 7 dias APÓS ficar elegível — baseline = max(queueTime, dontQueueUntil))
+    const jAhead = await db.addJob({ scriptId: s1._id, node: 'node//ahead', dontQueueUntil: nowT + 115 * 86400 });
+    await db.update(jAhead._id, { queueTime: nowT - 8 * 86400 });
+    const stale2b = await db.getStaleJobs(nowT, 180, 7 * 86400);
+    t('stale: agendado longe no futuro não expira pelo queueTime', !stale2b.some(j => j._id == jAhead._id));
     // job agendado p/ futuro (dontQueueUntil futuro) NUNCA é stale, nem com queueTime antigo
     const jFuture = await db.addJob({ scriptId: s1._id, node: 'node//future', dontQueueUntil: nowT + 4 * 86400 });
     await db.update(jFuture._id, { queueTime: nowT - 200 });

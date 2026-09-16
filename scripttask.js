@@ -412,7 +412,13 @@ module.exports.scripttask = function (parent) {
                             return;
                         }
                         var targetNodes = null;
-                        if (snapshot != null) {
+                        // 1.0.1: ONLY filter-based schedules resolve targets from the snapshot.
+                        // The snapshot is shared per-cycle (any filtered schedule makes it
+                        // non-null); passing a direct schedule's null filter to matchNodes
+                        // parses to null → matched EVERY node (1147 jobs from a 1-node
+                        // schedule in prod E2E). Direct schedules must keep targetNodes
+                        // null so addScheduleJobs uses s.node.
+                        if (snapshot != null && s.filter != null && s.filter !== '') {
                             var ids = TARGETING.matchNodes(snapshot.nodes, s.filter, { meshes: snapshot.meshes, connectivity: snapshot.connectivity });
                             if (!ids.length) obj.consoleLog('filter schedule "' + s._id + '" matched 0 devices for filter: ' + s.filter);
                             targetNodes = ids;

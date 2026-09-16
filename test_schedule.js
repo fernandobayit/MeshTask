@@ -67,6 +67,21 @@ t('schedule nextRun avançado (db.update aplicado)', (() => {
             return p4.db.updateCalls && p4.db.updateCalls.some(c => c.id == 'schX' && c.args.nextRun == nextJobTime);
         })());
 
+// 2b) BUG 1.0.1: schedule DIRECT (sem filter) no mesmo ciclo de um filtered NÃO
+//     pode receber targetNodes da frota inteira (matchNodes(null) = todos)
+var p6 = makePlugin();
+p6.getFleetSnapshot = function (cb) { cb({ nodes: [{_id:'node//a', os:'linux'},{_id:'node//b', os:'linux'},{_id:'node//c', os:'linux'}], meshes: {}, connectivity: {} }); };
+var schedDirect = { _id: 'schDirect', scriptId: 's1', command: null, commandType: null, node: 'node//b', scheduledBy: 'admin', nextRun: null, recur: 'minutes', interval: 10, filter: null, endAt: null, startAt: nextJobTime };
+p6.db.schedules.push({ _id: 'schFiltered', scriptId: 's1', filter: 'os:linux', node: null, scheduledBy: 'admin', nextRun: null, recur: 'minutes', interval: 10, endAt: null, startAt: nextJobTime });
+p6.db.schedules.push(schedDirect);
+// getIncompleteJobsForSchedule precisa filtrar por schedule de verdade:
+p6.db.getIncompleteJobsForSchedule = async function (sid) { return p6.db.jobs.filter(j => j.jobSchedule == sid); };
+await p6.makeJobsFromSchedules();
+await new Promise(r => setTimeout(r, 100));
+var directJobs = p6.db.jobs.filter(j => j.jobSchedule == 'schDirect');
+t('bug matchNodes(null): schedule direct cria 1 job no próprio node', directJobs.length == 1 && directJobs[0].node == 'node//b');
+t('bug matchNodes(null): schedule filtrado continua criando por filtro', p6.db.jobs.filter(j => j.jobSchedule == 'schFiltered').length == 3);
+
 // 3) addScheduledJob por nodes (sem filter)
 var p2 = makePlugin();
 p2.serveraction({

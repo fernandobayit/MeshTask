@@ -107,8 +107,6 @@ module.exports.CreateDB = function (meshserver) {
         return s;
     }
 
-    function esc(s) { return (s == null) ? '' : String(s).replace(/'/g, "''"); }
-
     // ---------- init ----------
     obj.initFunctions = function () {
         obj.updateDBVersion = function (new_version) {
@@ -212,7 +210,19 @@ module.exports.CreateDB = function (meshserver) {
             });
         };
 
-        obj.deleteSchedulesForScript = function (id) {
+        // S11: GC — scripts efêmeros (ad-hoc) sem NENHUM job referenciando
+        // (clearAll/deleção de schedule nunca passam pelo jobComplete). Só
+        // remove efêmeros criados há mais de graceSec (janela do dispatch).
+        obj.deleteOrphanEphemeralScripts = function (graceSec) {
+            if (graceSec == null) graceSec = 3600;
+            return new Promise(function (res, rej) {
+                enqueue(function (next) {
+                    db.run("DELETE FROM docs WHERE type='script' AND json_extract(doc, '$.ephemeral') = 1 AND (json_extract(doc, '$.created') IS NULL OR json_extract(doc, '$.created') < $1) AND NOT EXISTS (SELECT 1 FROM docs j WHERE j.type = 'job' AND j.scriptId = docs.id)", {'$1': Math.floor(new Date() / 1000) - graceSec }, function (e) { next(); (e ? rej(e) : res(this.changes)); });
+                });
+            });
+        };
+
+        obj.deleteJobSchedulesForScript = function (id) {
             return new Promise(function (res, rej) {
                 enqueue(function (next) {
                     db.run("DELETE FROM docs WHERE scriptId = $1 AND type = 'jobSchedule'", {'$1': id }, function (e) { next(); (e ? rej(e) : res()); });
@@ -263,8 +273,8 @@ module.exports.CreateDB = function (meshserver) {
 
         obj.getSchedulesDueForJob = function (scheduleId) {
             var nowTime = Math.floor(new Date() / 1000);
-            var lim = scheduleId ? (' AND id = ' + JSON.stringify(String(scheduleId)).replace('"', "'").replace('"', "'")) : '';
-            // scheduleId is used internally with known-good ids; still parameterize when present
+            // D14: 'lim' morto (concatenação SQL pré-parametrizada) removido;
+            // o SQL real usa $3.
             var sql = "SELECT doc FROM docs WHERE type = 'jobSchedule'" + (scheduleId ? ' AND id = $3' : '');
             var params = scheduleId ? { '$3': scheduleId } : {};
             return new Promise(function (res, rej) {
@@ -306,16 +316,26 @@ module.exports.CreateDB = function (meshserver) {
     obj.getPendingJobs = function (nodeScope) {
             if (nodeScope == null || !Array.isArray(nodeScope)) return Promise.resolve(false);
             var nowTime = Math.floor(new Date() / 1000);
-            var inClause = nodeScope.map(function (n, i) { return '$' + (i + 2); }).join(',');
-            var params = { '$1': nowTime };
-            nodeScope.forEach(function (n, i) { params['$' + (i + 2)] = n; });
-            return new Promise(function (res, rej) {
-                // S2: dispatchTime IS NULL — apenas jobs virgens entram no dispatch
-                // normal; job despachado aguardando conclusão NUNCA é reenviado pelo
-                // tick (evita reexecutar script não-idempotente após restart do agente).
-                db.all("SELECT doc FROM docs WHERE type = 'job' AND node IN (" + inClause + ") AND completeTime IS NULL AND dispatchTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $1)", params, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
+            // D8: IN() com 1 parâmetro por nó estoura SQLITE_MAX_VARIABLE_NUMBER
+            // em frotas grandes — fatiar em chunks de ~900 e unir resultados.
+            if (nodeScope.length == 0) return Promise.resolve([]);
+            var CHUNK = 900;
+            var chunks = [];
+            for (var ci = 0; ci < nodeScope.length; ci += CHUNK) chunks.push(nodeScope.slice(ci, ci + CHUNK));
+            return Promise.all(chunks.map(function (chunk) {
+                var inClause = chunk.map(function (n, i) { return '$' + (i + 2); }).join(',');
+                var params = { '$1': nowTime };
+                chunk.forEach(function (n, i) { params['$' + (i + 2)] = n; });
+                return new Promise(function (res, rej) {
+                    // S2: dispatchTime IS NULL — apenas jobs virgens entram no dispatch
+                    // normal; job despachado aguardando conclusão NUNCA é reenviado pelo
+                    // tick (evita reexecutar script não-idempotente após restart do agente).
+                    db.all("SELECT doc FROM docs WHERE type = 'job' AND node IN (" + inClause + ") AND completeTime IS NULL AND dispatchTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $1)", params, function (e, rows) {
+                        if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
+                    });
                 });
+            })).then(function (all) {
+                return all.reduce(function (a, b) { return a.concat(b); }, []);
             });
         };
 
@@ -423,6 +443,9 @@ module.exports.CreateDB = function (meshserver) {
 
         obj.getVariables = function (limiters) {
             if (limiters != null) {
+                // D15: names vazio gerava 'IN ()' (erro de sintaxe) — contrato
+                // passa a devolver [] em vez de rejeitar.
+                if (!Array.isArray(limiters.names) || limiters.names.length == 0) return Promise.resolve([]);
                 return new Promise(function (res, rej) {
                     db.all("SELECT doc FROM docs WHERE type = 'variable' AND name IN (" + limiters.names.map(function (_, i) { return '$' + (i + 1); }).join(',') + ') ORDER BY LOWER(name)',
                         limiters.names.reduce(function (a, n, i) { a['$' + (i + 1)] = n; return a; }, {}), function (e, rows) {
@@ -450,7 +473,7 @@ module.exports.CreateDB = function (meshserver) {
 
         obj.checkDefaults = function () {
             db.get("SELECT doc FROM docs WHERE type = 'folder' AND name = 'Shared' AND path = 'Shared'", [], function (e, row) {
-                if (!e && !row) obj.addFolder('Shared', 'Shared');
+                if (!e && !row) obj.addFolder('Shared', 'Shared').catch(function (er) { log('checkDefaults addFolder: ' + er); });
             });
         };
 

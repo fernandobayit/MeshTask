@@ -245,10 +245,19 @@ TARGETING.validate = function (expr) {
         var known = ['user:', 'ip:', 'group:', 'tag:', 'atag:', 'os:', 'amt:', 'desc:', 'connectivity:', 'wsc:', null];
         if (known.indexOf(n.prefix) < 0) return false;
         // prefix null mas contém ':' no valor → prefixo desconhecido (ex.: xyz:foo)
-        if (n.prefix == null && n.value.indexOf(':') >= 0 && n.negate == false) {
+        // D10: a checagem vale TAMBÉM com '!' — '!xyz:foo' passava e casava com nada.
+        if (n.prefix == null && n.value.indexOf(':') >= 0) {
             var maybePrefix = n.value.split(':')[0] + ':';
+            // D9/D10: prefixos de conectividade aceitam apenas valores definidos
+            if (maybePrefix == 'connectivity:' || maybePrefix == 'c:') {
+                var cv = n.value.split(':')[1] || '';
+                var okVals = ['agent', 'cira', 'amt', 'relay', 'mqtt', 'local', 'online', 'offline'];
+                if (cv == '' || okVals.indexOf(cv) < 0) return false; // c: desconhecido → rejeita (antes: false silencioso)
+            }
             return knownPrefixes.indexOf(maybePrefix) >= 0;
         }
+        // D9: 'c:'/'connectivity:' direto (com prefixo) também valida o valor
+        if ((n.prefix == 'connectivity:') && (n.value == '' || ['agent', 'cira', 'amt', 'mqtt', 'local', 'online', 'offline'].indexOf(n.value) < 0)) return false;
         return true;
     }
     if (!walk(ast)) return { ok: false, error: 'prefixo desconhecido' };

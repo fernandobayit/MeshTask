@@ -26,11 +26,12 @@ var dbg = function(str) {
     logStream.end('\n');
 }
 
-Array.prototype.remove = function(from, to) {
-  var rest = this.slice((to || from) + 1 || this.length);
-  this.length = from < 0 ? this.length + from : from;
-  return this.push.apply(this, rest);
-};
+// A9: NÃO poluir Array.prototype (contaminava o processo do agente e
+// outros plugins); usar helper local com splice.
+function removeFromArray(arr, item) {
+    var idx = arr.indexOf(item);
+    if (idx !== -1) arr.splice(idx, 1);
+}
 
 function consoleaction(args, rights, sessionid, parent) {
     isWsconnection = false;
@@ -139,7 +140,8 @@ function finalizeJob(job, retVal, errVal) {
     } else if (errVal != null && typeof errVal != 'string') {
         errVal = String(errVal);
     }
-    runningJobs.remove(runningJobs.indexOf(job.jobId));
+    // A9: helper local em vez de Array.prototype.remove
+    removeFromArray(runningJobs, job.jobId);
     if (typeof runningJobPIDs[job.jobId] != 'undefined') delete runningJobPIDs[job.jobId];
     mesh.SendCommand({ 
         "action": "plugin", 
@@ -160,8 +162,8 @@ function runPowerShell(sObj, jObj) {
     const fs = require('fs');
     var rand =  Math.random().toString(32).replace('0.', '');
     
-    var oName = 'st' + rand + '.txt';
-    var pName = 'st' + rand + '.ps1';
+    var oName = 'st' + process.pid + '_' + rand + '.txt';
+    var pName = 'st' + process.pid + '_' + rand + '.ps1';
     var pwshout = '', pwsherr = '', cancontinue = false;
     try {
         // A6: PS 5.1 lê .ps1 sem BOM como ANSI — acentos (PT-BR) corrompidos;
@@ -229,8 +231,8 @@ function runPowerShellNonWin(sObj, jObj) {
     dbg('Path chosen is: ' + path);
     path = path + '/';
     
-    var oName = 'st' + rand + '.txt';
-    var pName = 'st' + rand + '.ps1';
+    var oName = 'st' + process.pid + '_' + rand + '.txt';
+    var pName = 'st' + process.pid + '_' + rand + '.ps1';
     var pwshout = '', pwsherr = '', cancontinue = false;
     try {
         var childp = require('child_process').execFile('/bin/sh', ['sh']);
@@ -238,26 +240,27 @@ function runPowerShellNonWin(sObj, jObj) {
         childp.stdout.on('data', function (chunk) { pwshout += chunk; });
         childp.stdin.write('which pwsh' + '\n');
         childp.stdin.write('exit\n');
-        childp.waitExit();
-    } catch (e) { finalizeJob(jObj, null, "Couldn't determine pwsh in env: " + e); }
-    if (pwsherr != '') {
-        finalizeJob(jObj, null, "PowerShell env determination error: " + pwsherr);
-        return;
-    }
-    if (pwshout.trim() != '') {
-        cancontinue = true;
-    }
-    if (cancontinue === false) { finalizeJob(jObj, null, "PowerShell is not installed"); return; }
+        // A13: waitExit() congelava o event loop do agente — a checagem do pwsh
+        // continua no callback do 'exit' e o corpo virou a função runNonWin.
+        childp.on('exit', function () {
+            if (pwsherr != '') { finalizeJob(jObj, null, "PowerShell env determination error: " + pwsherr); return; }
+            if (pwshout.trim() != '') cancontinue = true;
+            if (cancontinue === false) { finalizeJob(jObj, null, "PowerShell is not installed"); return; }
+            runNonWin();
+        });
+    } catch (e) { finalizeJob(jObj, null, "Couldn't determine pwsh in env: " + e); return; }
+
+    function runNonWin() {
     try {
-        fs.writeFileSync(path + pName, '#!' + pwshout + '\n' + sObj.content.split('\r\n').join('\n').split('\r').join('\n'));
+        fs.writeFileSync(path + pName, '#!' + pwshout + '\n' + String(sObj.content).split('\r\n').join('\n').split('\r').join('\n'));
         var outstr = '', errstr = '';
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stderr.on('data', function (chunk) { errstr += chunk; });
         child.stdout.on('data', function (chunk) { });
         runningJobPIDs[jObj.jobId] = child.pid;
         
-        child.stdin.write('cd ' + path + '\n');                                                                                                                                                
-        child.stdin.write('chmod a+x ' + pName + '\n');                                                                                                                                        
+        child.stdin.write('cd ' + path + '\n');
+        child.stdin.write('chmod a+x ' + pName + '\n');
         child.stdin.write('./' + pName + ' > ' + oName + '\n');
         child.on('exit', function(procRetVal, procRetSignal) {
             // A7: exit code REAL — stderr com exit 0 é warning; exit != 0 é erro.
@@ -289,6 +292,7 @@ function runPowerShellNonWin(sObj, jObj) {
         dbg('Error block was (PowerShellNonWin): ' + e);
         finalizeJob(jObj, null, e);
     }
+    }
 }
 
 function runBat(sObj, jObj) {
@@ -298,8 +302,8 @@ function runBat(sObj, jObj) {
     }
     const fs = require('fs');
     var rand =  Math.random().toString(32).replace('0.', '');
-    var oName = 'st' + rand + '.txt';
-    var pName = 'st' + rand + '.bat';
+    var oName = 'st' + process.pid + '_' + rand + '.txt';
+    var pName = 'st' + process.pid + '_' + rand + '.bat';
     try {
         fs.writeFileSync(pName, sObj.content);
         var outstr = '', errstr = '';
@@ -364,12 +368,12 @@ function runBash(sObj, jObj) {
     //child.execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/c', 'RunDll32.exe user32.dll,LockWorkStation'], { type: 1 });
     
     var rand =  Math.random().toString(32).replace('0.', '');
-    var oName = 'st' + rand + '.txt';
-    var pName = 'st' + rand + '.sh';
+    var oName = 'st' + process.pid + '_' + rand + '.txt';
+    var pName = 'st' + process.pid + '_' + rand + '.sh';
     try {
         // A7: CRLF corrompia script .sh (shebang com \r → bad interpreter);
         // normalizar CR→LF antes de gravar.
-        fs.writeFileSync(path + pName, String(sObj.content).split('\r\n').join('\n').split('\r').join('\n'));
+        fs.writeFileSync(path + pName, String(sObj.content).split('\r\n').join('\n').split('\r').join('\n'), { mode: 0o600 });
         var outstr = '', errstr = '';
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stderr.on('data', function (chunk) { errstr += chunk; });

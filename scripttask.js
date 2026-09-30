@@ -318,7 +318,16 @@ module.exports.scripttask = function (parent) {
     };
 
     obj.cleanHistory = function () {
-        if (Math.round(Math.random() * 100) == 99) obj.db.deleteOldHistory();
+        if (Math.round(Math.random() * 100) != 99) return;
+        // S11: GC de scripts efêmeros órfãos — clearAllPendingJobs/deleção de
+        // schedules/timeout de stale APAGAVAM os jobs mas não os efêmeros
+        // (invisíveis na UI, acumulavam no banco para sempre).
+        obj.db.deleteOldHistory().catch(function (e) { obj.consoleLog('deleteOldHistory error: ' + e); });
+        if (obj.db.deleteOrphanEphemeralScripts) {
+            obj.db.deleteOrphanEphemeralScripts(3600).then(function (n) {
+                if (n && n > 0) obj.consoleLog('GC: ' + n + ' ephemeral script(s) órfão(s) removido(s)');
+            }).catch(function (e) { obj.consoleLog('ephemeral GC error: ' + e); });
+        }
     };
 
     // =====================================================================
@@ -365,7 +374,11 @@ module.exports.scripttask = function (parent) {
                 var baseTime = s.startAt;
                 var lastDayOfWeek = Math.max(...s.daysOfWeek);
                 if (s.nextRun != null) {
-                    baseTime = s.nextRun;
+                    // S8: nextRun >7 dias no passado (agent offline + job expirado)
+                    // deixava a janela de 8 dias sem nenhum matching → schedule
+                    // deletado silenciosamente; re-ancora a busca no presente.
+                    if (s.nextRun < nowTime - 604800) baseTime = nowTime;
+                    else baseTime = s.nextRun;
                     if (nowDate.getDay() == lastDayOfWeek) { baseTime = baseTime + (s.interval * 604800) - (lastDayOfWeek * 86400); }
                 } else if (s.startAt < nowTime) {
                     baseTime = Math.floor(nowDate.getTime() / 1000);
@@ -379,10 +392,10 @@ module.exports.scripttask = function (parent) {
                     if (s.nextRun != null && s.daysOfWeek.indexOf(dm2.getDay()) !== -1 && dm2.getTime() > nowDate.getTime()) { dm = dm2; break; }
                 }
                 if (dm == null) { nextTime = null; break; }
+                // S9: recompor a HORA LOCAL do startAt no dia alvo (antes era
+                // diff em segundos absolutos → deriva ±1h após transição DST).
                 var sa = new Date(0); sa.setUTCSeconds(s.startAt);
-                var sad = new Date(sa.getFullYear(), sa.getMonth(), sa.getDate());
-                var diff = (sa.getTime() - sad.getTime()) / 1000;
-                nextTime = Math.floor(dm.getTime() / 1000) + diff;
+                nextTime = Math.floor(new Date(dm.getFullYear(), dm.getMonth(), dm.getDate(), sa.getHours(), sa.getMinutes(), sa.getSeconds()).getTime() / 1000);
                 break;
             }
             default:
@@ -499,6 +512,9 @@ module.exports.scripttask = function (parent) {
     //  meshagent.js L1565 → serveraction(command, obj, parent))
     // =====================================================================
     obj.serveraction = function (command, myparent, grandparent) {
+        // S10: db não pronto (startup lento / falha do dbReady) → nada a fazer;
+        // antes, o handler quebrava com TypeError no primeiro uso de obj.db.
+        if (obj.db == null) return;
         if (obj.guardServerAction(command, myparent) === false) return;
         var user = (myparent && myparent.user) ? myparent.user : null;
 

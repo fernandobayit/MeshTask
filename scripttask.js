@@ -342,6 +342,14 @@ module.exports.scripttask = function (parent) {
             case 'hourly':
             case 'daily': {
                 var mult = (s.recur == 'minutes') ? 60 : (s.recur == 'hourly') ? 3600 : 86400;
+                // Guard: interval inválido (0, negativo ou ausente → NaN) trava o
+                // servidor em loop infinito / re-agenda o job a cada tick. Um
+                // schedule assim é inválido: tratado como done (removido).
+                if (!(s.interval > 0)) {
+                    obj.consoleLog('schedule ' + s._id + ' tem interval inválido (' + s.interval + ') — ignorado');
+                    nextTime = null;
+                    break;
+                }
                 if (s.nextRun == null) { nextTime = s.startAt; break; }
                 nextTime = s.nextRun + (s.interval * mult);
                 while (nextTime < nowTime) { nextTime = nextTime + (s.interval * mult); }
@@ -520,20 +528,39 @@ module.exports.scripttask = function (parent) {
             case 'jobComplete': {
                 var jobId = command.jobId, retVal = command.retVal, errVal = command.errVal, dispatchTime = command.dispatchTime;
                 var completeTime = Math.floor(Date.now() / 1000);
-                obj.db.update(jobId, {
-                    completeTime: completeTime,
-                    returnVal: retVal,
-                    errorVal: errVal,
-                    dispatchTime: dispatchTime
-                })
-                    .then(function () {
+                // A15: validação da posse e dos tipos — o agente só pode concluir
+                // job do PRÓPRIO nó, e dispatchTime precisa ser numérico.
+                if (typeof jobId != 'string' || jobId == null) break;
+                obj.db.get(jobId)
+                    .then(function (jobs) {
+                        // A15: job inexistente ou já concluído (ex.: timeout do servidor)
+                        // → nada a fazer; um jobComplete tardio NUNCA sobrescreve o timeout.
+                        if (!jobs || !jobs.length || jobs[0].completeTime != null) return null;
+                        // A15: posse — apenas o próprio nó pode concluir o job
+                        if (jobs[0].node != myparent.dbNodeKey) {
+                            obj.consoleLog('jobComplete NEGADO: job ' + jobId + ' pertence a ' + jobs[0].node + ', não a ' + myparent.dbNodeKey);
+                            return null;
+                        }
+                        var upd = { completeTime: completeTime, returnVal: retVal, errorVal: errVal };
+                        if (typeof dispatchTime == 'number' && dispatchTime > 0) upd.dispatchTime = dispatchTime; // sanitizado
+                        return obj.db.update(jobId, upd);
+                    })
+                    .then(function (updated) {
+                        if (!updated || !updated.updated) return null;
                         return obj.db.get(jobId).then(function (jobs) {
-                            // Ephemeral script cleanup (ad-hoc commands): deleted once complete
+                            // S1: cleanup do efêmero — apagar APENAS quando nenhum
+                            // outro job do mesmo script estiver pendente (antes, o
+                            // 1º jobComplete apagava o script e os demais targets
+                            // perdiam a execução como orfãos).
                             var cleanup = Promise.resolve();
                             if (jobs[0] && jobs[0].scriptId) {
-                                cleanup = obj.db.get(jobs[0].scriptId).then(function (scripts) {
-                                    if (scripts[0] && scripts[0].ephemeral === true) return obj.db.delete(scripts[0]._id);
-                                    return Promise.resolve();
+                                var scriptId = jobs[0].scriptId;
+                                cleanup = obj.db.get(scriptId).then(function (scripts) {
+                                    if (!scripts[0] || scripts[0].ephemeral !== true) return Promise.resolve();
+                                    return obj.db.countPendingJobsForScript(scriptId, jobId).then(function (n) {
+                                        if (n == 0) return obj.db.delete(scripts[0]._id);
+                                        obj.consoleLog('ephemeral script ' + scriptId + ' mantido: ' + n + ' job(s) pendente(s)');
+                                    });
                                 }).catch(function () { });
                             }
                             return cleanup.then(function () { return (jobs[0] ? jobs[0].jobSchedule : null); });
@@ -806,6 +833,13 @@ module.exports.scripttask = function (parent) {
     // =====================================================================
     obj.addScheduledJob = function (command, user) {
         var sj = command.schedule;
+        // Validar interval ANTES de criar o schedule (S3): interval 0/negativo/
+        // ausente trava o scheduler em loop infinito ou re-agenda a cada tick.
+        var iv = parseInt(sj.interval, 10);
+        if (sj.recur != 'once' && sj.recur != 'weekly' && !(iv >= 1)) {
+            obj.consoleLog('addScheduledJob rejected: invalid interval (' + sj.interval + ')');
+            return;
+        }
         var hasCommand = (command.command != null && typeof command.command == 'string' && command.command.trim() != '');
         var base = {
             scriptId: hasCommand ? null : command.scriptId,
@@ -814,7 +848,7 @@ module.exports.scripttask = function (parent) {
             node: null,
             scheduledBy: user.name,
             recur: sj.recur,
-            interval: sj.interval,
+            interval: isNaN(iv) ? sj.interval : iv,
             daysOfWeek: sj.dayVals,
             startAt: sj.startAt,
             endAt: sj.endAt,

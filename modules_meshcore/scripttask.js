@@ -35,7 +35,9 @@ Array.prototype.remove = function(from, to) {
 function consoleaction(args, rights, sessionid, parent) {
     isWsconnection = false;
     wscon = parent;
-    var _sessionid = sessionid;
+    // A1: sem 'var' — a atribuição precisa ir para a GLOBAL _sessionid;
+    // o var local sombreava e jobComplete saía sem sessionid (A1).
+    _sessionid = sessionid;
     if (typeof args['_'] == 'undefined') {
       args['_'] = [];
       args['_'][1] = args.pluginaction;
@@ -436,37 +438,41 @@ function runScript(sObj, jObj) {
         require('process-manager').getProcesses(function (plist) {
             dbg('Got process list');
             dbg('There are currently ' + runningJobs.length + ' running jobs.');
-            if (runningJobs.length) {
-                runningJobs.forEach(function (jobId, idx) {
-                    dbg('Checking for running job: ' + jobId + ' with PID ' + runningJobPIDs[jobId]);
-                    if (typeof plist[runningJobPIDs[jobId]] == 'undefined' || typeof plist[runningJobPIDs[jobId]].cmd != 'string') {
-                        dbg('Found job with no process. Removing running status.');
-                        delete runningJobPIDs[jobId];
-                        runningJobs.remove(runningJobs.indexOf(idx));
-                        //dbg('RunningJobs: ' + JSON.stringify(runningJobs));
-                        //dbg('RunningJobsPIDs: ' + JSON.stringify(runningJobPIDs));
-                    }
-                });
+            // A2: iterar DE trás para frente e remover por jobId (não por índice);
+            // antes, indexOf(idx) era -1 e remove(-1) apagava o ÚLTIMO elemento.
+            for (var i = runningJobs.length - 1; i >= 0; i--) {
+                var jobId = runningJobs[i];
+                dbg('Checking for running job: ' + jobId + ' with PID ' + runningJobPIDs[jobId]);
+                if (typeof plist[runningJobPIDs[jobId]] == 'undefined' || typeof plist[runningJobPIDs[jobId]].cmd != 'string') {
+                    dbg('Found job with no process. Removing running status.');
+                    delete runningJobPIDs[jobId];
+                    runningJobs.splice(i, 1);
+                }
             }
         });
     }
     if (jobIsRunning(jObj)) { dbg('Job already running job id [' + jObj.jobId + ']. Skipping.'); return; }
+    // A14: clonar o script — a interpolação de variáveis NÃO PODE mutar o
+    // objeto em cache, senão o 2º job do lote roda com interpolado do 1º nó.
+    // A12 no processo: key com escape de regex e val passado como função
+    // (evita que $&, $1, etc. no VALOR sejam interpretados como padrões).
+    var doc = (jObj.replaceVars != null) ? JSON.parse(JSON.stringify(sObj)) : sObj;
     if (jObj.replaceVars != null) {
         Object.getOwnPropertyNames(jObj.replaceVars).forEach(function(key) {
           var val = jObj.replaceVars[key];
-          sObj.content = sObj.content.replace(new RegExp('#'+key+'#', 'g'), val);
+          doc.content = doc.content.replace(new RegExp('#' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '#', 'g'), function() { return val; });
           dbg('replacing var '+ key + ' with ' + val);
         });
-        sObj.content = sObj.content.replace(new RegExp('#(.*?)#', 'g'), 'VAR_NOT_FOUND');
+        doc.content = doc.content.replace(new RegExp('#(.*?)#', 'g'), 'VAR_NOT_FOUND');
     }
     runningJobs.push(jObj.jobId);
-    dbg('Running Script '+ sObj._id);
-    switch (sObj.filetype) {
+    dbg('Running Script '+ doc._id);
+    switch (doc.filetype) {
         case 'ps1':
-            runPowerShell(sObj, jObj);
+            runPowerShell(doc, jObj);
         break;
         case 'bat':
-            runBat(sObj, jObj);
+            runBat(doc, jObj);
         break;
         case 'bash':
             runBash(sObj, jObj);

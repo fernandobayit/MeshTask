@@ -300,8 +300,21 @@ module.exports.CreateDB = function (meshserver) {
             var params = { '$1': nowTime };
             nodeScope.forEach(function (n, i) { params['$' + (i + 2)] = n; });
             return new Promise(function (res, rej) {
-                db.all("SELECT doc FROM docs WHERE type = 'job' AND node IN (" + inClause + ") AND completeTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $1)", params, function (e, rows) {
+                // S2: dispatchTime IS NULL — apenas jobs virgens entram no dispatch
+                // normal; job despachado aguardando conclusão NUNCA é reenviado pelo
+                // tick (evita reexecutar script não-idempotente após restart do agente).
+                db.all("SELECT doc FROM docs WHERE type = 'job' AND node IN (" + inClause + ") AND completeTime IS NULL AND dispatchTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $1)", params, function (e, rows) {
                     if (e) return rej(e); res(rows.map(rowDoc));
+                });
+            });
+        };
+
+        // S1: quantos jobs do mesmo script continuam pendentes (para o cleanup
+        // de scripts efêmeros só apagar quando o ÚLTIMO job concluir).
+        obj.countPendingJobsForScript = function (scriptId, excludeJobId) {
+            return new Promise(function (res, rej) {
+                db.get("SELECT COUNT(*) AS n FROM docs WHERE type = 'job' AND scriptId = $1 AND completeTime IS NULL AND id != $2", {'$1': scriptId, '$2': excludeJobId || '' }, function (e, row) {
+                    if (e) return rej(e); res(row ? row.n : 0);
                 });
             });
         };
@@ -507,10 +520,18 @@ module.exports.CreateDB = function (meshserver) {
         db.serialize(function () {
             db.run('PRAGMA journal_mode = WAL');
             db.run('PRAGMA synchronous = NORMAL');
+            // S5: busy_timeout — segundo acesso externo ao arquivo (backup/admin)
+            // não falha imediatamente com SQLITE_BUSY.
+            db.run('PRAGMA busy_timeout = 5000');
             SCHEMA.split(';').forEach(function (stmt) {
                 if (stmt.trim()) db.run(stmt + ';');
             });
-            db.run('CREATE INDEX IF NOT EXISTS idx_docs_filter ON docs(filter)', [], function (e) { if (e) log('index filter: ' + e); resolve(); });
+            db.run('CREATE INDEX IF NOT EXISTS idx_docs_filter ON docs(filter)', [], function (e) { if (e) log('index filter: ' + e); });
+            // S4: índice único parcial — impede que fluxos concorrentes
+            // (tick do queueRun e jobComplete→makeJobsFromSchedules) criem jobs
+            // duplicados do mesmo slot (schedule + dontQueueUntil + node).
+            // Jobs ad-hoc (sem jobSchedule) não são afetados (NULL distinto).
+            db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_job_slot ON docs(json_extract(doc, '$.jobSchedule'), json_extract(doc, '$.dontQueueUntil'), node) WHERE type = 'job' AND completeTime IS NULL", [], function (e) { if (e) log('index job_slot: ' + e); resolve(); });
         });
     }
 

@@ -32,6 +32,9 @@ module.exports.CreateDB = function (meshserver) {
     function requireSqlite3() {
         try { return require('sqlite3'); } catch (e) { }
         var candidates = [];
+        // D6: o node_modules do PRÓPRIO plugin é o 1º fallback (antes pegava
+        // dirname(__dirname) e pulava ele)
+        try { candidates.push(require('path').join(__dirname, 'node_modules', 'sqlite3')); } catch (e) { }
         if (meshserver && meshserver.parentpath) candidates.push(require('path').join(meshserver.parentpath, 'node_modules', 'sqlite3'));
         try {
             // walk up from this file: plugins/scripttask -> plugins -> <datapath> -> parent install dir
@@ -121,7 +124,10 @@ module.exports.CreateDB = function (meshserver) {
         obj.getDBVersion = function () {
             return new Promise(function (res) {
                 db.get("SELECT doc FROM docs WHERE id = 'db_version'", [], function (e, row) {
-                    res((row && row.doc) ? (JSON.parse(row.doc).version || 1) : 1);
+                    if (e) { log('getDBVersion error: ' + e); return res(1); }
+                    var v = 1;
+                    if (row && row.doc) { try { v = (JSON.parse(row.doc).version || 1); } catch (ex) { log('corrupt db_version doc: ' + ex); } }
+                    res(v);
                 });
             });
         };
@@ -164,16 +170,20 @@ module.exports.CreateDB = function (meshserver) {
 
         obj.update = function (id, args) {
             return new Promise(function (res, rej) {
-                db.get('SELECT doc FROM docs WHERE id = $1', {'$1': id }, function (e, row) {
-                    if (e) return rej(e);
-                    if (!row) return res({ updated: 0 });
-                    var d = JSON.parse(row.doc);
-                    for (var k in args) { if (args[k] !== undefined) d[k] = args[k]; }
-                    if (d.type == 'script' && d.content != null) {
-                        if (d.filetype == 'bash') d.content = d.content.split('\r\n').join('\n').split('\r').join('\n');
-                        d.contentHash = require('crypto').createHash('sha384').update(d.content).digest('hex');
-                    }
-                    enqueue(function (next) {
+                enqueue(function (next) {
+                    // D3: SELECT dentro da fila serial — read-modify-write atômico;
+                    // antes, dois update() intercalados liam o mesmo doc e um
+                    // sobrescrevia os campos do outro (lost update).
+                    db.get('SELECT doc FROM docs WHERE id = $1', {'$1': id }, function (e, row) {
+                        if (e) { next(); return rej(e); }
+                        if (!row) { next(); return res({ updated: 0 }); }
+                        var d;
+                        try { d = JSON.parse(row.doc); } catch (pe) { next(); log('corrupt doc on update ' + id + ': ' + pe); return rej(pe); }
+                        for (var k in args) { if (args[k] !== undefined) d[k] = args[k]; }
+                        if (d.type == 'script' && d.content != null) {
+                            if (d.filetype == 'bash') d.content = d.content.split('\r\n').join('\n').split('\r').join('\n');
+                            d.contentHash = require('crypto').createHash('sha384').update(d.content).digest('hex');
+                        }
                         db.run('UPDATE docs SET doc = $1, name = $2, path = $3, completeTime = $4, dispatchTime = $5, queueTime = $6, nextRun = $7 WHERE id = $8',
                             {'$1': JSON.stringify(d), '$2':d.name || null, '$3':d.path || null,
                               4: (d.completeTime != null ? d.completeTime : null),
@@ -213,7 +223,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getByPath = function (path_) {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type IN ('script','folder') AND path = $1", {'$1': path_ }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -222,7 +232,7 @@ module.exports.CreateDB = function (meshserver) {
             if (id == null || id == 'null') return Promise.resolve([]);
             return new Promise(function (res, rej) {
                 db.all('SELECT doc FROM docs WHERE id = $1', {'$1': id }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -304,7 +314,7 @@ module.exports.CreateDB = function (meshserver) {
                 // normal; job despachado aguardando conclusão NUNCA é reenviado pelo
                 // tick (evita reexecutar script não-idempotente após restart do agente).
                 db.all("SELECT doc FROM docs WHERE type = 'job' AND node IN (" + inClause + ") AND completeTime IS NULL AND dispatchTime IS NULL AND (json_extract(doc, '$.dontQueueUntil') IS NULL OR json_extract(doc, '$.dontQueueUntil') <= $1)", params, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -322,7 +332,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getJobNodeHistory = function (nodeId) {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'job' AND node = $1 ORDER BY queueTime DESC LIMIT 200", {'$1': nodeId }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -330,7 +340,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getJobScriptHistory = function (scriptId) {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'job' AND scriptId = $1 ORDER BY COALESCE(completeTime, 0) DESC, queueTime DESC LIMIT 200", {'$1': scriptId }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -348,7 +358,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getJobSchedulesForScript = function (scriptId) {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'jobSchedule' AND scriptId = $1", {'$1': scriptId }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -356,7 +366,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getJobSchedulesForNode = function (nodeId) {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'jobSchedule' AND node = $1", {'$1': nodeId }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -366,7 +376,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getAllJobSchedules = function () {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'jobSchedule' ORDER BY queueTime DESC", [], function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -374,7 +384,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getJobSchedulesForFilter = function () {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'jobSchedule' AND filter IS NOT NULL", [], function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -382,7 +392,7 @@ module.exports.CreateDB = function (meshserver) {
         obj.getIncompleteJobsForSchedule = function (schedId) {
             return new Promise(function (res, rej) {
                 db.all("SELECT doc FROM docs WHERE type = 'job' AND json_extract(doc, '$.jobSchedule') = $1 AND completeTime IS NULL", {'$1': schedId }, function (e, rows) {
-                    if (e) return rej(e); res(rows.map(rowDoc));
+                    if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                 });
             });
         };
@@ -429,7 +439,7 @@ module.exports.CreateDB = function (meshserver) {
             } else {
                 return new Promise(function (res, rej) {
                     db.all("SELECT doc FROM docs WHERE type = 'variable' ORDER BY LOWER(name)", [], function (e, rows) {
-                        if (e) return rej(e); res(rows.map(rowDoc));
+                        if (e) return rej(e); res(rows.map(rowDoc).filter(Boolean));
                     });
                 });
             }
@@ -448,33 +458,46 @@ module.exports.CreateDB = function (meshserver) {
         obj.migrateFromNedb = function () {
             return new Promise(function (resolve) {
                 if (!fs.existsSync(nedbFile)) return resolve({ migrated: false, reason: 'no-nedb-file' });
-                db.get('SELECT COUNT(*) c FROM docs', [], function (e, row) {
-                    var existing = (row && row.c) || 0;
-                    // only auto-migrate when target is empty (idempotent)
-                    if (existing > 1) return resolve({ migrated: false, reason: 'target-not-empty', docs: existing });
-                    var raw = fs.readFileSync(nedbFile, 'utf8').split('\n');
-                    var docs = [];
-                    for (var i in raw) {
-                        if (!raw[i] || raw[i].charAt(0) != '{') continue;
-                        try { var d = JSON.parse(raw[i]); if (d && d.type && d._id && d.$$indexCreated == null) docs.push(d); } catch (ex) { }
+                // D1: migração retomável — INSERT OR REPLACE com mesmo _id é
+                // idempotente; NÃO exigimos banco alvo vazio (crash parcial já não
+                // deixa o restante preso para sempre).
+                var raw = fs.readFileSync(nedbFile, 'utf8').split('\n');
+                var docs = [];
+                for (var i in raw) {
+                    if (!raw[i] || raw[i].charAt(0) != '{') continue;
+                    try {
+                        var d = JSON.parse(raw[i]);
+                        if (!d || !d.type || !d._id || d.$$indexCreated != null) continue;
+                        // D12: timestamps legados em string-ISO viravam TEXT na coluna
+                        // INTEGER e anulavam deletes/getStaleJobs (ordenacao SQLite).
+                        ['completeTime', 'dispatchTime', 'queueTime', 'nextRun'].forEach(function (f) {
+                            if (typeof d[f] == 'string') { var t = Date.parse(d[f]); d[f] = isNaN(t) ? null : Math.floor(t / 1000); }
+                        });
+                        docs.push(d);
+                    } catch (ex) { }
+                }
+                if (docs.length == 0) return resolve({ migrated: false, reason: 'no-docs' });
+                var done = 0, failed = 0;
+                for (var k in docs) {
+                    (function (doc) {
+                        insertDoc(doc).then(function () { if (++done + failed == docs.length) finish(); })
+                            .catch(function () { failed++; if (done + failed == docs.length) finish(); });
+                    })(docs[k]);
+                }
+                function finish() {
+                    if (failed > 0) {
+                        // D2: NÃO renomeia o NeDB com falhas de inserção — os docs
+                        // faltantes ficam retomáveis no próximo boot (nada é perdido).
+                        log('Migration incomplete: ' + done + ' ok, ' + failed + ' failed — NeDB kept for retry');
+                        resolve({ migrated: false, reason: 'partial-fail', docs: done, failed: failed });
+                        return;
                     }
-                    if (docs.length == 0) return resolve({ migrated: false, reason: 'no-docs' });
-                    var done = 0, failed = 0;
-                    for (var k in docs) {
-                        (function (doc) {
-                            insertDoc(doc).then(function () { if (++done + failed == docs.length) finish(); })
-                                .catch(function () { failed++; if (done + failed == docs.length) finish(); });
-                        })(docs[k]);
-                    }
-                    function finish() {
-                        // backup the old file so nothing is lost
-                        var bak = nedbFile + '.migrated-' + Math.floor(new Date() / 1000);
-                        try { fs.renameSync(nedbFile, bak); } catch (ex) { log('NeDB backup rename failed: ' + ex); }
-                        log('Migrated ' + done + ' documents from NeDB to SQLite (backup: ' + path.basename(bak) + ')');
-                        obj.migrated = true;
-                        resolve({ migrated: true, docs: done, failed: failed, backup: bak });
-                    }
-                });
+                    var bak = nedbFile + '.migrated-' + Math.floor(new Date() / 1000);
+                    try { fs.renameSync(nedbFile, bak); } catch (ex) { log('NeDB backup rename failed: ' + ex); }
+                    log('Migrated ' + done + ' documents from NeDB to SQLite (backup: ' + path.basename(bak) + ')');
+                    obj.migrated = true;
+                    resolve({ migrated: true, docs: done, failed: 0, backup: bak });
+                }
             });
         };
 
@@ -485,7 +508,11 @@ module.exports.CreateDB = function (meshserver) {
         // (checkDefaults é chamado após a migração, em obj.ready)
     };
 
-    function rowDoc(r) { return JSON.parse(r.doc); }
+    function rowDoc(r) {
+        // D4: doc corrompido no banco NÃO pode quebrar a query inteira (nem o
+        // processo) — linha inválida é pulada com log.
+        try { return JSON.parse(r.doc); } catch (e) { log('corrupt row doc (id ' + r.id + ') skipped: ' + e); return null; }
+    }
 
     function insertDoc(d) {
         return new Promise(function (res, rej) {

@@ -82,21 +82,22 @@ function consoleaction(args, rights, sessionid, parent) {
         case 'cacheScript':
             var sObj = args.script;
             cacheScript(sObj);
-            var setRun = [];
-            if (pendingDownload.length) {
-                pendingDownload.forEach(function(pd, k) { 
-                    if (pd.scriptId == sObj._id && pd.scriptHash == sObj.contentHash) {
-                        if (setRun.indexOf(pd) === -1) {
-                            runScript(sObj, pd);
-                            setRun.push(pd);
-                        }
-                        pendingDownload.remove(k);
-                    }
-                });
-            }
+            // A3: filtrar em NOVO array — remover com remove(k) durante o
+            // forEach pulava o elemento seguinte; hash divergente (script
+            // editado no meio do voo) ficou órfão para sempre.
+            var runNow = [];
+            pendingDownload = pendingDownload.filter(function(pd) {
+                if (pd.scriptId != sObj._id) return true;
+                if (pd.scriptHash != sObj.contentHash) { finalizeJob(pd, null, 'Script changed during job (hash mismatch)'); return false; }
+                runNow.push(pd);
+                return false;
+            });
+            runNow.forEach(function(pd) { runScript(sObj, pd); });
         break;
         case 'clearAll':
             clearCache();
+            // A10: clearAll também precisa limpar pendências locais de download
+            pendingDownload = [];
             mesh.SendCommand({ 
                 "action": "plugin", 
                 "plugin": "scripttask",
@@ -130,7 +131,14 @@ function consoleaction(args, rights, sessionid, parent) {
 }
 
 function finalizeJob(job, retVal, errVal) {
-    if (errVal != null && errVal.stack != null) errVal = errVal.stack;
+    // A8: errVal robusto — objeto de error sem stack serializava '{}' no
+    // histórico (erro silencioso); objetos viram JSON, valores não-string
+    // viram String().
+    if (errVal != null && typeof errVal == 'object') {
+        errVal = (errVal.stack != null) ? String(errVal.stack) : JSON.stringify(errVal);
+    } else if (errVal != null && typeof errVal != 'string') {
+        errVal = String(errVal);
+    }
     runningJobs.remove(runningJobs.indexOf(job.jobId));
     if (typeof runningJobPIDs[job.jobId] != 'undefined') delete runningJobPIDs[job.jobId];
     mesh.SendCommand({ 
@@ -156,39 +164,37 @@ function runPowerShell(sObj, jObj) {
     var pName = 'st' + rand + '.ps1';
     var pwshout = '', pwsherr = '', cancontinue = false;
     try {
-        fs.writeFileSync(pName, sObj.content);
+        // A6: PS 5.1 lê .ps1 sem BOM como ANSI — acentos (PT-BR) corrompidos;
+        // gravar com BOM quando houver caracteres não-ASCII.
+        var hasNonAscii = /[^\x00-\x7F]/.test(sObj.content);
+        var psBuf = hasNonAscii ? Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(sObj.content, 'utf8')]) : Buffer.from(sObj.content, 'utf8');
+        fs.writeFileSync(pName, psBuf);
         var outstr = '', errstr = '';
-        var child = require('child_process').execFile(process.env['windir'] + '\\system32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy Bypass'] );
+        // A6: '-ExecutionPolicy Bypass' era UM argumento com espaço — execFile
+        // não divide tokens; o PowerShell recebia um parâmetro inválido.
+        var child = require('child_process').execFile(process.env['windir'] + '\\system32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass'] );
         child.stderr.on('data', function (chunk) { errstr += chunk; });
         child.stdout.on('data', function (chunk) { });
         runningJobPIDs[jObj.jobId] = child.pid;
         child.stdin.write('.\\' + pName + ' | Out-File ' + oName + ' -Encoding UTF8\r\n');
         child.on('exit', function(procRetVal, procRetSignal) {
             dbg('Exiting with '+procRetVal + ', Signal: ' + procRetSignal); 
-            if (errstr != '') {
-                finalizeJob(jObj, null, errstr);
+            // A7: exit code REAL — stderr com exit 0 é warning, não falha.
+            if (procRetVal != 0) {
                 try { 
                     fs.unlinkSync(oName);
                     fs.unlinkSync(pName);
                 } catch (e) { dbg('Could not unlink files, error was: ' + e); }
-                return;
-            }
-            if (procRetVal == 1) {
-                finalizeJob(jObj, null, 'Process terminated unexpectedly.');
-                try { 
-                    fs.unlinkSync(oName);
-                    fs.unlinkSync(pName);
-                } catch (e) { dbg('Could not unlink files, error was: ' + e); }
+                finalizeJob(jObj, null, 'exit=' + procRetVal + (errstr ? (': ' + errstr) : ''));
                 return;
             }
             try { 
                 outstr = fs.readFileSync(oName, 'utf8').toString();
-            } catch (e) { outstr = (procRetVal) ? 'Failure' : 'Success'; }
+            } catch (e) { outstr = 'Success'; }
             if (outstr) {
-                //outstr = outstr.replace(/[^\x20-\x7E]/g, ''); 
                 try { outstr = outstr.trim(); } catch (e) { }
             } else {
-                outstr = (procRetVal) ? 'Failure' : 'Success';
+                outstr = (errstr != '') ? ('Warnings:\n' + errstr) : 'Success';
             }
             dbg('Output is: ' + outstr);
             finalizeJob(jObj, outstr);
@@ -254,30 +260,22 @@ function runPowerShellNonWin(sObj, jObj) {
         child.stdin.write('chmod a+x ' + pName + '\n');                                                                                                                                        
         child.stdin.write('./' + pName + ' > ' + oName + '\n');
         child.on('exit', function(procRetVal, procRetSignal) {
-            if (errstr != '') {
-                finalizeJob(jObj, null, errstr);
-                try {
-                    fs.unlinkSync(path + oName);
-                    fs.unlinkSync(path + pName);
-                } catch (e) { dbg('Could not unlink files, error was: ' + e + ' for path ' + path); }
-                return;
-            }
-            if (procRetVal == 1) {
-                finalizeJob(jObj, null, 'Process terminated unexpectedly.');
+            // A7: exit code REAL — stderr com exit 0 é warning; exit != 0 é erro.
+            if (procRetVal != 0) {
                 try {
                     fs.unlinkSync(path + oName);
                     fs.unlinkSync(path + pName);
                 } catch (e) { dbg('Could not unlink files1, error was: ' + e + ' for path ' + path); }
+                finalizeJob(jObj, null, 'exit=' + procRetVal + (errstr ? (': ' + errstr) : ''));
                 return;
             }
             try { 
                 outstr = fs.readFileSync(path + oName, 'utf8').toString();
-            } catch (e) { outstr = (procRetVal) ? 'Failure' : 'Success'; }
+            } catch (e) { outstr = 'Success'; }
             if (outstr) {
-                //outstr = outstr.replace(/[^\x20-\x7E]/g, ''); 
                 try { outstr = outstr.trim(); } catch (e) { }
             } else {
-                outstr = (procRetVal) ? 'Failure' : 'Success';
+                outstr = (errstr != '') ? ('Warnings:\n' + errstr) : 'Success';
             }
             dbg('Output is: ' + outstr);
             finalizeJob(jObj, outstr);
@@ -313,30 +311,22 @@ function runBat(sObj, jObj) {
         child.stdin.write('exit\r\n');
 
         child.on('exit', function(procRetVal, procRetSignal) {
-            if (errstr != '') {
+            // A7: exit code REAL decide — stderr com exit 0 é warning.
+            if (procRetVal != 0) {
                 try { 
                     fs.unlinkSync(oName);
                     fs.unlinkSync(pName);
                 } catch (e) { dbg('Could not unlink files, error was: ' + e); }
-                finalizeJob(jObj, null, errstr);
-                return;
-            }
-            if (procRetVal == 1) {
-                try { 
-                    fs.unlinkSync(oName);
-                    fs.unlinkSync(pName);
-                } catch (e) { dbg('Could not unlink files, error was: ' + e); }
-                finalizeJob(jObj, null, 'Process terminated unexpectedly.');
+                finalizeJob(jObj, null, 'exit=' + procRetVal + (errstr ? (': ' + errstr) : ''));
                 return;
             }
             try { 
                 outstr = fs.readFileSync(oName, 'utf8').toString();
-            } catch (e) { outstr = (procRetVal) ? 'Failure' : 'Success'; }
+            } catch (e) { outstr = 'Success'; }
             if (outstr) {
-                //outstr = outstr.replace(/[^\x20-\x7E]/g, ''); 
                 try { outstr = outstr.trim(); } catch (e) { }
             } else {
-                outstr = (procRetVal) ? 'Failure' : 'Success';
+                outstr = (errstr != '') ? ('Warnings:\n' + errstr) : 'Success';
             }
             dbg('Output is: ' + outstr);
             try {
@@ -377,7 +367,9 @@ function runBash(sObj, jObj) {
     var oName = 'st' + rand + '.txt';
     var pName = 'st' + rand + '.sh';
     try {
-        fs.writeFileSync(path + pName, sObj.content);
+        // A7: CRLF corrompia script .sh (shebang com \r → bad interpreter);
+        // normalizar CR→LF antes de gravar.
+        fs.writeFileSync(path + pName, String(sObj.content).split('\r\n').join('\n').split('\r').join('\n'));
         var outstr = '', errstr = '';
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stderr.on('data', function (chunk) { errstr += chunk; });
@@ -389,30 +381,24 @@ function runBash(sObj, jObj) {
         child.stdin.write('exit\n');
         
         child.on('exit', function(procRetVal, procRetSignal) {
-            if (errstr != '') {
+            // A7: exit code REAL decide o resultado — stderr com exit 0 é
+            // warning (não erro); exit ≠ 1 também é erro com código no texto.
+            if (procRetVal != 0) {
+                var errmsg = (errstr != '') ? errstr : ('Script falhou com exit code ' + procRetVal);
                 try {
                     fs.unlinkSync(path + oName);
                     fs.unlinkSync(path + pName);
                 } catch (e) { dbg('Could not unlink files, error was: ' + e + ' for path ' + path); }
-                finalizeJob(jObj, null, errstr);
-                return;
-            }
-            if (procRetVal == 1) {
-                try {
-                    fs.unlinkSync(path + oName);
-                    fs.unlinkSync(path + pName);
-                } catch (e) { dbg('Could not unlink files1, error was: ' + e + ' for path ' + path); }
-                finalizeJob(jObj, null, 'Process terminated unexpectedly.');
+                finalizeJob(jObj, null, 'exit=' + procRetVal + (errstr ? (': ' + errstr) : ''));
                 return;
             }
             try { 
                 outstr = fs.readFileSync(path + oName, 'utf8').toString();
-            } catch (e) { outstr = (procRetVal) ? 'Failure' : 'Success'; }
+            } catch (e) { outstr = 'Success'; }
             if (outstr) {
-                //outstr = outstr.replace(/[^\x20-\x7E]/g, ''); 
                 try { outstr = outstr.trim(); } catch (e) { }
             } else {
-                outstr = (procRetVal) ? 'Failure' : 'Success';
+                outstr = (errstr != '') ? ('Warnings:\n' + errstr) : 'Success';
             }
             dbg('Output is: ' + outstr);
             try {
@@ -475,10 +461,14 @@ function runScript(sObj, jObj) {
             runBat(doc, jObj);
         break;
         case 'bash':
-            runBash(sObj, jObj);
+            runBash(doc, jObj);
         break;
         default:
-            dbg('Unknown filetype: '+ sObj.filetype);
+            // A5: filetype desconhecido NÃO pode deixar job zumbi (runningJobs
+            // sem resposta ao server — timeout do server seria enganoso).
+            dbg('Unknown filetype: ' + doc.filetype);
+            runningJobs.splice(runningJobs.indexOf(jObj.jobId), 1);
+            finalizeJob(jObj, null, 'Unsupported script type: ' + doc.filetype);
         break;
     }
 }

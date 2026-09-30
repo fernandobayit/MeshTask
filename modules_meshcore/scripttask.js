@@ -1,6 +1,6 @@
 /** 
 * @description MeshCentral ScriptTask plugin
-* @author Ryan Blenis
+* @author Fernando Lima (based on Ryan Blenis' original module)
 * @copyright 
 * @license Apache-2.0
 */

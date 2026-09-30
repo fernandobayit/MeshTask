@@ -2,7 +2,7 @@
   "name": "ScriptTask",
   "shortName": "scripttask",
   "version": "1.0.0",
-  "author": "Ryan Blenis, Fernando Lima",
+  "author": "Fernando Lima",
   "description": "MeshTask Runner — script (bash/bat/ps1) scheduling and execution for endpoints [clean rewrite: unified serveraction, SQLite, dynamic filter targeting, admin-only]",
   "hasAdminPanel": false,
   "homepage": "https://github.com/fernandobayit/MeshCentral-ScriptTask",

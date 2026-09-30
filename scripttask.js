@@ -1,6 +1,6 @@
 /**
 * @description MeshCentral ScriptTask (MeshTask Runner) — v1.0.0 clean rewrite
-* @author Ryan Blenis, Fernando Lima
+* @author Fernando Lima
 * @license Apache-2.0
 *
 * v1.0.0 — rewritten from scratch. Architecture:

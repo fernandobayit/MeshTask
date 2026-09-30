@@ -1,5 +1,5 @@
 /**
-* @description MeshCentral ScriptTask (MeshTask Runner) — v1.0.0 clean rewrite
+* @description MeshCentral ScriptTask (MeshTask Runner) — v1.0.1 clean rewrite
 * @author Fernando Lima
 * @license Apache-2.0
 *

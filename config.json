@@ -1,7 +1,7 @@
 {
   "name": "ScriptTask",
   "shortName": "scripttask",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Fernando Lima",
   "description": "MeshTask Runner — script (bash/bat/ps1) scheduling and execution for endpoints [clean rewrite: unified serveraction, SQLite, dynamic filter targeting, admin-only]",
   "hasAdminPanel": false,

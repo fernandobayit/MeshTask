@@ -82,10 +82,11 @@ module.exports.scripttask = function (parent) {
         return true;
     };
 
-    // Dispatch targets restricted to connected full admins ('server-users'
-    // would reach every connected user session).
+    // S6: eventos do plugin são admin-only — o '*' (broadcast para todas as
+    // sessões de usuário conectadas) vazava historyData/newScriptTree/
+    // variableData a não-admins. Sem admins conectados → nada entregue.
     obj.getDispatchTargets = function () {
-        var targets = ['*'];
+        var targets = [];
         try {
             var ws = obj.meshServer.webserver;
             if (ws && ws.wssessions) {
@@ -702,7 +703,7 @@ module.exports.scripttask = function (parent) {
                 var TARGETINGP = require(obj.targetingPath);
                 var vres = TARGETINGP.validate(String(command.filter || ''));
                 if (!vres.ok) {
-                    obj.dispatch([user._id], 'previewTargetsResult', { error: vres.error });
+                    obj.dispatch([user._id], 'previewTargetsResult', { reqId: command.reqId, error: vres.error });
                     break;
                 }
                 obj.resolveFilterTargets(command.filter, function (ids, TARGETING2, snapshot) {
@@ -719,6 +720,7 @@ module.exports.scripttask = function (parent) {
                         };
                     });
                     obj.dispatch([user._id], 'previewTargetsResult', {
+                        reqId: command.reqId, // U3: eco do id do pedido (anti-race)
                         filter: command.filter,
                         describe: TARGETING2.describe(command.filter),
                         targets: preview
@@ -760,6 +762,13 @@ module.exports.scripttask = function (parent) {
                 var cmdNodes = command.nodes;
                 var cmdFilter = (command.filter != null && typeof command.filter == 'string' && command.filter.trim() != '') ? command.filter.trim() : null;
                 if (!cmdContent.trim()) break;
+                // S7: filtro precisa passar no validate — parse nulo em matchNodes
+                // devolve a FROTA INTEIRA; runCommand era o único caminho sem validação.
+                if (cmdFilter != null) {
+                    var TARGETING_RC = require(obj.targetingPath);
+                    var vres = TARGETING_RC.validate(cmdFilter);
+                    if (!vres.ok) { obj.consoleLog('runCommand: invalid filter rejected: ' + vres.error); break; }
+                }
                 if (cmdType == 'bash') cmdContent = cmdContent.split('\r\n').join('\n');
                 obj.db.addScript('cmd-' + Math.floor(Date.now() / 1000) + '.' + cmdType, cmdContent, 'Shared', cmdType)
                     .then(function (created) { return obj.db.update(created._id, { ephemeral: true }).then(function () { return created; }); })
@@ -931,7 +940,12 @@ module.exports.scripttask = function (parent) {
             var vars = { scriptTree: 'null' };
             obj.db.getScriptTree()
                 .then(function (tree) {
-                    vars.scriptTree = JSON.stringify(tree);
+                    // U1: escape para contexto <script> — nome com "</script>" não
+                    // pode fechar a tag cedo (XSS armazenado); \u2028/29 quebram JS.
+                    vars.scriptTree = JSON.stringify(tree)
+                        .replace(/</g, '\\u003c')
+                        .replace(/\u2028/g, '\\u2028')
+                        .replace(/\u2029/g, '\\u2029');
                     res.render(obj.VIEWS + 'user', vars);
                 })
                 .catch(function () { res.sendStatus(500); });

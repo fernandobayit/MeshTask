@@ -392,12 +392,14 @@ function redrawScriptTree() {
       indent = (f.path.match(/\//g) || []).length + 1;
       var name = f.path.match(/[^\/]+$/);
       folder_id = f._id;
-      str += '<div draggable="true" x-data-path="' + f.path + '" x-data-id="' + f._id + '" x-data-folder="' + folder_id + '" style="margin-left: ' + indent + 'em;" class="lifolder" onclick="toggleCollapse(this);"><span class="fname">' + name + '</span></div>';
+      // U2: escape de dados no HTML/atributos — nome de pasta/script com
+      // < ou " injetava markup (XSS armazenado entre admins).
+      str += '<div draggable="true" x-data-path="' + esc(f.path) + '" x-data-id="' + esc(f._id) + '" x-data-folder="' + esc(folder_id) + '" style="margin-left: ' + indent + 'em;" class="lifolder" onclick="toggleCollapse(this);"><span class="fname">' + esc(name) + '</span></div>';
       lastpath = f.path;
       indent += 1;
     }
     if (f.type != 'folder') {
-        str += '<div id="' + f._id + '" draggable="true" x-data-path="' + f.path + '" x-data-id="' + f._id + '" x-data-folder="' + folder_id + '" style="margin-left: ' + indent + 'em;" class="liscript" onclick="goScript(this);"><span class="fname">' + f.name + '</span> [<span class="ftype">' + f.filetype + '</span>]</div>';
+        str += '<div id="' + esc(f._id) + '" draggable="true" x-data-path="' + esc(f.path) + '" x-data-id="' + esc(f._id) + '" x-data-folder="' + esc(folder_id) + '" style="margin-left: ' + indent + 'em;" class="liscript" onclick="goScript(this);"><span class="fname">' + esc(f.name) + '</span> [<span class="ftype">' + esc(f.filetype) + '</span>]</div>';
     }
   });
   str += '</div>';
@@ -516,7 +518,9 @@ function goRename() {
     var id = selectedScriptId();
     if (id == null) { mtToast('Selecione um script ou pasta.', 'err'); return; }
     var el = document.querySelectorAll('.liselected')[0];
-    var name = el.querySelector('.fname').innerHTML;
+    // U2: textContent em vez de innerHTML — com esc() na árvore, innerHTML
+    // devolveria "A &amp; B" e re-escapar no diálogo corromperia o nome.
+    var name = el.querySelector('.fname').textContent;
     parent.setDialogMode(2, "Renomear", 3, renameEx, '<input type="text" value="' + esc(name) + '" id=stfilename style=width:100% /><input type="hidden" id="stid" value="' + id + '" />');
     parent.focusTextBox('stfilename');
 }
@@ -548,7 +552,8 @@ function deleteEx() {
 function goDelete() {
     var els = document.querySelectorAll('.liselected');
     if (!els.length) return;
-    var name = els[0].querySelector('.fname').innerHTML;
+    // U2: textContent em vez de innerHTML (ver goRename)
+    var name = els[0].querySelector('.fname').textContent;
     parent.setDialogMode(2, "Excluir " + name, 3, deleteEx, 'Confirma a exclusão? <input type="hidden" id="stdelid" value="' + els[0].getAttribute('x-data-id') + '" />');
 }
 function deleteScheduleEx() {
@@ -656,13 +661,16 @@ function mtPreviewDebounced() {
     clearTimeout(mtPreviewTimer);
     mtPreviewTimer = setTimeout(function () { mtPreview(); }, 600);
 }
+var mtPreviewReqSeq = 0, mtLastPreviewReq = 0;
 function mtPreview() {
     var f = Q('mtFilterInput').value.trim();
     QH('mtPreviewErr', ''); QV('mtPreviewErr', false);
     if (f == '') { QV('mtPreviewBox', false); QV('mtPreviewSummary', false); return; }
     try {
-        parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'previewTargets', filter: f });
-    } catch (ex) { QH('mtPreviewErr', 'Erro ao contatar o servidor: ' + ex); QV('mtPreviewErr', true); }
+        // U3: reqId para descartar resposta fora de ordem
+        mtLastPreviewReq = ++mtPreviewReqSeq;
+        parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'previewTargets', filter: f, reqId: mtPreviewReqSeq });
+    } catch (ex) { QH('mtPreviewErr', 'Erro ao contatar o servidor: ' + esc(ex)); QV('mtPreviewErr', true); }
 }
 function mtSchedSave() {
     var o = {};
@@ -729,7 +737,10 @@ function mtSchedSave() {
 parent.pluginHandler.scripttask.previewTargetsResult = function (message) {
     var ev = (message.event || message);
     if (Q('mtSchedOverlay').style.display == 'none') return; // agendador fechado
-    if (ev.error) { QH('mtPreviewErr', '⚠ ' + ev.error); QV('mtPreviewErr', true); QV('mtPreviewBox', false); QV('mtPreviewSummary', false); return; }
+    // U3: resposta fora de ordem (reqId mais antigo) é descartada
+    if (ev.reqId != null && ev.reqId < mtLastPreviewReq) return;
+    // U3b: erro ecoado do filtro pode chegar com markup — escapar sempre
+    if (ev.error) { QH('mtPreviewErr', '⚠ ' + esc(ev.error)); QV('mtPreviewErr', true); QV('mtPreviewBox', false); QV('mtPreviewSummary', false); return; }
     QV('mtPreviewErr', false);
     var body = Q('mtPreviewBody');
     body.innerHTML = '';
@@ -1066,7 +1077,12 @@ function allowDrag(e) {
 }
 function dropMove(evt) {
     const move_id = evt.dataTransfer.getData('text');
-    const container_id = evt.target.parentNode.getAttribute('x-data-id');
+    // U9: alvo precisa ser uma pasta — soltar sobre linha de script enviava
+    // to:<id-de-script> (moveScript para destino inexistente).
+    const dropEl = evt.target.closest('.lifolder');
+    if (!dropEl || !move_id) return;
+    const container_id = dropEl.getAttribute('x-data-id');
+    if (container_id == null) return;
     parent.meshserver.send({ action: 'plugin', plugin: 'scripttask', pluginaction: 'moveScript', id: move_id, to: container_id });
 }
 

@@ -109,7 +109,7 @@ var p5 = makePlugin();
 p5.meshServer.webserver.wssessions = { 'user//admin': [{}], 'user//peao': [{}] };
 p5.meshServer.webserver.users = { 'user//admin': { siteadmin: 0xFFFFFFFF }, 'user//peao': { siteadmin: 2048 } };
 var targets = p5.getDispatchTargets();
-t('targets: * + admin id', targets.indexOf('*') >= 0 && targets.indexOf('user//admin') >= 0 && targets.indexOf('user//peao') < 0);
+t('targets: só admin id (sem * broadcast — S6)', targets.indexOf('*') < 0 && targets.indexOf('user//admin') >= 0 && targets.indexOf('user//peao') < 0);
 
 console.log('\n' + pass + ' passaram, ' + fail + ' falharam'); process.exit(0);
 })().catch(e => { console.error('ERRO FATAL:', e); process.exit(2); });

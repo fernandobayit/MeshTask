@@ -1,14 +1,14 @@
 {
   "name": "ScriptTask",
   "shortName": "scripttask",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Fernando Lima",
   "description": "MeshTask Runner — script (bash/bat/ps1) scheduling and execution for endpoints [clean rewrite: unified serveraction, SQLite, dynamic filter targeting, admin-only]",
   "hasAdminPanel": false,
   "homepage": "https://github.com/fernandobayit/MeshTask",
   "changelogUrl": "https://raw.githubusercontent.com/fernandobayit/MeshTask/master/changelog.md",
   "configUrl": "https://raw.githubusercontent.com/fernandobayit/MeshTask/master/config.json",
-  "downloadUrl": "https://github.com/fernandobayit/MeshTask/archive/refs/tags/v1.0.1.zip",
+  "downloadUrl": "https://github.com/fernandobayit/MeshTask/archive/refs/tags/v1.0.2.zip",
   "repository": {
     "type": "git",
     "url": "https://github.com/fernandobayit/MeshTask.git"

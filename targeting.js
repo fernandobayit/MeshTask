@@ -115,7 +115,7 @@ function parseTerm(term) {
 */
 TARGETING.matchNodes = function (nodeDocs, filterExpr, context) {
     var ast = TARGETING.parse(filterExpr);
-    if (ast == null) return nodeDocs.map(function (d) { return d._id; });
+    if (ast == null) return []; // fail-closed: parse invalido NAO pode atingir a frota inteira
     var ctx = context || {};
     var result = [];
     for (var i in nodeDocs) {

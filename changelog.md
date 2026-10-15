@@ -1,5 +1,19 @@
 # Changelog — MeshTask (MeshCentral ScriptTask Runner)
 
+## v1.0.2 (2026-10-14) — code review fixes
+
+### Server core
+- R1: deleteElement usava `deleteSchedulesForScript` (inexistente em db2.js) — TypeError silencioso impedia a limpeza de agendamentos ao deletar um script; agora chama `deleteJobSchedulesForScript`
+- R2: weekly sem interval (NaN) deletava o schedule silenciosamente — validação no addScheduledJob (default 1 semana) + guard defensivo em determineNextJobTime
+
+### Targeting (targeting.js)
+- R3: matchNodes com parse inválido (expressão vazia/nula) devolvia a FROTA INTEIRA (fail-open) — agora fail-closed: array vazio
+
+### Testes
+- test_db2.js / test_serveraction.js: mock e chamadas alinhados à API real do db2.js (`deleteJobSchedulesForScript`)
+- test_targeting.js: checks do comportamento fail-open atualizados para fail-closed
+- suíte: 94 checks verdes
+
 ## v1.0.1 (2026-09-30) — release GBH-S004
 
 Versão de estabilidade: ~45 correções de bugs mapeadas na revisão completa de 2026-09-30.

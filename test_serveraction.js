@@ -35,7 +35,7 @@ function makePlugin() {
         getVariables: async function(){ return []; },
         deleteOldHistory: async function(){ return; },
         deleteByPath: async function(){ return; },
-        deleteSchedulesForScript: async function(){ return; },
+        deleteJobSchedulesForScript: async function(){ return; },
         deletePendingJobsForNode: async function(){ return; },
         getByPath: async function(){ return []; },
         updateScriptJobName: async function(){ return; },

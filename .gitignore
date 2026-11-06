@@ -1,0 +1,15 @@
+node_modules/
+*.sqlite*
+*.db*
+coverage/
+
+# Local research snapshots and runtime data (not product source)
+docs/upstream-evidence/
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*.pfx
+*.p12

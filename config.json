@@ -1,0 +1,8 @@
+{
+  "name": "MeshTask 2",
+  "shortName": "meshtask2",
+  "version": "2.0.0-alpha.1",
+  "description": "Orquestração, scheduler automático e executor MeshAgent protegido; alpha não homologado.",
+  "author": "MeshTask 2 contributors",
+  "hasAdminPanel": false
+}

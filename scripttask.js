@@ -379,7 +379,7 @@ module.exports.scripttask = function (parent) {
                     // deletado silenciosamente; re-ancora a busca no presente.
                     if (s.nextRun < nowTime - 604800) baseTime = nowTime;
                     else baseTime = s.nextRun;
-                    if (nowDate.getDay() == lastDayOfWeek) { baseTime = baseTime + (s.interval * 604800) - (lastDayOfWeek * 86400); }
+                    if (nowDate.getDay() == lastDayOfWeek) { baseTime = baseTime + ((s.interval > 0 ? s.interval : 1) * 604800) - (lastDayOfWeek * 86400); }
                 } else if (s.startAt < nowTime) {
                     baseTime = Math.floor(nowDate.getTime() / 1000);
                 }
@@ -861,7 +861,8 @@ module.exports.scripttask = function (parent) {
         // Validar interval ANTES de criar o schedule (S3): interval 0/negativo/
         // ausente trava o scheduler em loop infinito ou re-agenda a cada tick.
         var iv = parseInt(sj.interval, 10);
-        if (sj.recur != 'once' && sj.recur != 'weekly' && !(iv >= 1)) {
+        if (sj.recur == 'weekly') { if (!(iv >= 1)) iv = 1; } // weekly: default 1 semana (antes: NaN deletava o schedule)
+        else if (sj.recur != 'once' && !(iv >= 1)) {
             obj.consoleLog('addScheduledJob rejected: invalid interval (' + sj.interval + ')');
             return;
         }
@@ -914,7 +915,7 @@ module.exports.scripttask = function (parent) {
                 delObj = Object.assign({}, found[0]);
                 var file = found[0];
                 if (file.type == 'folder') return obj.db.deleteByPath(file.path);
-                if (file.type == 'script') return obj.db.deleteSchedulesForScript(file._id);
+                if (file.type == 'script') return obj.db.deleteJobSchedulesForScript(file._id);
                 if (file.type == 'jobSchedule') return obj.db.deletePendingJobsForSchedule(file._id);
                 return Promise.resolve();
             })

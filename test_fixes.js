@@ -119,6 +119,12 @@ function t(name, cond) { if (cond) { pass++; console.log('  OK ' + name); } else
     console.log('\n=== A2 cleanup runningJobs ===');
     t('A2: usa splice(i, 1) em vez de remove(indexOf(idx))', src.indexOf('runningJobs.splice(i, 1);') !== -1 && src.indexOf('runningJobs.remove(runningJobs.indexOf(idx));') === -1);
 
+    // === A16: fs do meshagent (Duktape) NÃO aceita options no writeFileSync ===
+    console.log('\n=== A16 compat Duktape (runBash) ===');
+    t('A16: writeFileSync do runBash sem objeto options', src.indexOf(".split('\\r').join('\\n'), { mode: 0o600 })") === -1);
+    t('A16: chmodSync 0600 (384) best-effort presente', src.indexOf('fs.chmodSync(path + pName, 384)') !== -1);
+    t('A16: chmod 700 no shell (sem a+x)', src.indexOf("child.stdin.write('chmod 700 ' + pName") !== -1 && src.indexOf("child.stdin.write('chmod a+x ' + pName") === -1);
+
     console.log('\n' + pass + ' passaram, ' + fail + ' falharam');
     process.exit(fail ? 1 : 0);
 })().catch(function (e) { console.log('ERRO FATAL: ' + e); process.exit(1); });

@@ -2,7 +2,7 @@
 
 > Agendamento e execução de **scripts (bash / bat / ps1)** em endpoints gerenciados pelo MeshCentral — com persistência SQLite, targeting dinâmico por filtros e administração 100% admin-only.
 
-![version](https://img.shields.io/badge/version-1.0.1-blue) ![meshcentral](https://img.shields.io/badge/MeshCentral-%3E%3D1.1.35-green) ![tests](https://img.shields.io/badge/tests-94%20checks-brightgreen)
+![version](https://img.shields.io/badge/version-1.0.2-blue) ![meshcentral](https://img.shields.io/badge/MeshCentral-%3E%3D1.1.35-green) ![tests](https://img.shields.io/badge/tests-94%20checks-brightgreen)
 
 ## Visão geral
 
@@ -30,7 +30,7 @@ URLs do plugin:
 | configUrl | `https://raw.githubusercontent.com/fernandobayit/MeshTask/master/config.json` |
 | changelogUrl | `https://raw.githubusercontent.com/fernandobayit/MeshTask/master/changelog.md` |
 | versionHistoryUrl | `https://api.github.com/repos/fernandobayit/MeshTask/tags` |
-| downloadUrl | `https://github.com/fernandobayit/MeshTask/archive/refs/tags/v1.0.1.zip` |
+| downloadUrl | `https://github.com/fernandobayit/MeshTask/archive/refs/tags/v1.0.2.zip` |
 
 > O fluxo de update do MeshCentral consulta essas URLs **anonimamente** — o repositório deve estar **público**.
 

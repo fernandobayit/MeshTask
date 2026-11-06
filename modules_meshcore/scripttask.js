@@ -260,7 +260,7 @@ function runPowerShellNonWin(sObj, jObj) {
         runningJobPIDs[jObj.jobId] = child.pid;
         
         child.stdin.write('cd ' + path + '\n');
-        child.stdin.write('chmod a+x ' + pName + '\n');
+        child.stdin.write('chmod 700 ' + pName + '\n'); // A16: 700 — owner-only (A11)
         child.stdin.write('./' + pName + ' > ' + oName + '\n');
         child.on('exit', function(procRetVal, procRetSignal) {
             // A7: exit code REAL — stderr com exit 0 é warning; exit != 0 é erro.
@@ -373,14 +373,19 @@ function runBash(sObj, jObj) {
     try {
         // A7: CRLF corrompia script .sh (shebang com \r → bad interpreter);
         // normalizar CR→LF antes de gravar.
-        fs.writeFileSync(path + pName, String(sObj.content).split('\r\n').join('\n').split('\r').join('\n'), { mode: 0o600 });
+        // A16 (v1.0.2): meshagent roda Duktape (duk_api_stack.c) — o fs emulado
+        // NÃO aceita objeto options ({ mode }) no writeFileSync ('number required,
+        // found undefined'); gravar em 2 args e aplicar permissão via chmodSync
+        // (best-effort, protegido) + chmod 700 no shell antes da execução.
+        fs.writeFileSync(path + pName, String(sObj.content).split('\r\n').join('\n').split('\r').join('\n'));
+        try { fs.chmodSync(path + pName, 384); } catch (ex) { dbg('chmodSync 0600 falhou: ' + ex); }
         var outstr = '', errstr = '';
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stderr.on('data', function (chunk) { errstr += chunk; });
         child.stdout.on('data', function (chunk) { });
         runningJobPIDs[jObj.jobId] = child.pid;
         child.stdin.write('cd ' + path + '\n');
-        child.stdin.write('chmod a+x ' + pName + '\n');
+        child.stdin.write('chmod 700 ' + pName + '\n'); // A16: 700 — a+x abriria exec global (A11: conteúdo owner-only)
         child.stdin.write('./' + pName + ' > ' + oName + '\n');
         child.stdin.write('exit\n');
         

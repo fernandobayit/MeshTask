@@ -75,8 +75,8 @@ t('describe todos', T.describe('') == '');
 section('edge cases');
 t('regex chars no nome esc (ponto é literal)', T.matchNodes(FLEET, 'pfsense.edge', CTX).length == 0);
 t('nome com escape correto casa substring', T.matchNodes(FLEET, 'pfsense', CTX).length == 1);
-t('expressão só espaços → todos', T.matchNodes(FLEET, '  ', CTX).length == 5);
-t('filtro nulo → todos', T.matchNodes(FLEET, null, null).length == 5);
+t('expressão só espaços → nenhum (fail-closed)', T.matchNodes(FLEET, '  ', CTX).length == 0);
+t('filtro nulo → nenhum (fail-closed)', T.matchNodes(FLEET, null, null).length == 0);
 t('negação de grupo', T.matchNodes(FLEET, '!g:notebooks', CTX).length == 3);
 t('and com termo vazio no meio', T.parse('os:linux and and os:win') !== null);
 

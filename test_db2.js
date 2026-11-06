@@ -96,9 +96,9 @@ function section(s) { console.log('\n=== ' + s + ' ==='); }
     await db.deleteByPath('Shared/Temp');
     const treeAfter = await db.getScriptTree();
     t('deleteByPath remove da tree', treeAfter.every(d => d.name != 'del.sh'));
-    await db.deleteSchedulesForScript(s1._id);
+    await db.deleteJobSchedulesForScript(s1._id);
     const schAfter = await db.getJobSchedulesForScript(s1._id);
-    t('deleteSchedulesForScript', schAfter.length == 0);
+    t('deleteJobSchedulesForScript', schAfter.length == 0);
 
     section('migração NeDB → SQLite');
     // create a fake legacy nedb file in ANOTHER tmpdir
